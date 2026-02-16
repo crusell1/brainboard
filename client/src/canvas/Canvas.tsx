@@ -75,17 +75,18 @@ export default function Canvas() {
         nodesConnectable
       >
         <MiniMap
-          style={{
-            backgroundColor: "#1a1a1a",
-          }}
+          style={{ backgroundColor: "#1a1a1a" }}
           nodeColor={() => "#ffffff"}
         />
+
         <Controls
           style={{
             background: "#1a1a1a",
             color: "#000",
           }}
         />
+
+        <Background gap={20} size={1} color="#333" />
       </ReactFlow>
     </div>
   );
