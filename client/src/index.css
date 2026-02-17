@@ -66,3 +66,12 @@ button:focus-visible {
     background-color: #f9f9f9;
   }
 }
+.react-flow__controls button {
+  background: #1a1a1a !important;
+  color: white !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+}
+
+.react-flow__controls svg {
+  fill: white !important;
+}
