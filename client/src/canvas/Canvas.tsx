@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import {
   ReactFlow,
   addEdge,
@@ -10,33 +10,59 @@ import {
   type Connection,
   type Node,
   type Edge,
+  type ReactFlowInstance,
 } from "@xyflow/react";
 
 let id = 0;
 const getId = () => `node_${id++}`;
 
+const NODE_WIDTH = 150;
+const NODE_HEIGHT = 40;
+
 export default function Canvas() {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const reactFlowInstance = useRef<ReactFlowInstance | null>(null);
+
+  const lastClick = useRef<number>(0);
 
   const onConnect = useCallback(
     (connection: Connection) => setEdges((eds) => addEdge(connection, eds)),
     [setEdges],
   );
 
-  const addNode = () => {
-    const newNode: Node = {
-      id: getId(),
-      position: {
-        x: Math.random() * 600,
-        y: Math.random() * 400,
-      },
-      data: { label: "New Node" },
-      type: "default",
-    };
+  const onPaneClick = useCallback(
+    (event: React.MouseEvent) => {
+      const now = Date.now();
+      const DOUBLE_CLICK_DELAY = 250;
 
-    setNodes((nds) => [...nds, newNode]);
-  };
+      if (now - lastClick.current < DOUBLE_CLICK_DELAY) {
+        if (!reactFlowInstance.current) return;
+
+        const flowPosition = reactFlowInstance.current.screenToFlowPosition({
+          x: event.clientX,
+          y: event.clientY,
+        });
+
+        const centeredPosition = {
+          x: flowPosition.x - NODE_WIDTH / 2,
+          y: flowPosition.y - NODE_HEIGHT / 2,
+        };
+
+        const newNode: Node = {
+          id: getId(),
+          position: centeredPosition,
+          data: { label: "New Node" },
+          type: "default",
+        };
+
+        setNodes((nds) => [...nds, newNode]);
+      }
+
+      lastClick.current = now;
+    },
+    [setNodes],
+  );
 
   return (
     <div
@@ -46,30 +72,15 @@ export default function Canvas() {
         background: "#111111",
       }}
     >
-      <button
-        onClick={addNode}
-        style={{
-          position: "absolute",
-          zIndex: 10,
-          top: 15,
-          left: 15,
-          padding: "8px 14px",
-          borderRadius: 6,
-          border: "none",
-          background: "#1f1f1f",
-          color: "white",
-          cursor: "pointer",
-        }}
-      >
-        Add Node
-      </button>
-
       <ReactFlow
         nodes={nodes}
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onPaneClick={onPaneClick}
+        zoomOnDoubleClick={false}
+        onInit={(instance) => (reactFlowInstance.current = instance)}
         fitView
         nodesDraggable
         nodesConnectable
