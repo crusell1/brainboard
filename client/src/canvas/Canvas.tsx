@@ -37,6 +37,19 @@ export default function Canvas() {
     (connection: Connection) => setEdges((eds) => addEdge(connection, eds)),
     [setEdges],
   );
+  const onNodesDelete = useCallback(
+    (deleted: Node[]) => {
+      setEdges((eds) =>
+        eds.filter(
+          (edge) =>
+            !deleted.some(
+              (node) => edge.source === node.id || edge.target === node.id,
+            ),
+        ),
+      );
+    },
+    [setEdges],
+  );
 
   const onPaneClick = useCallback(
     (event: React.MouseEvent) => {
@@ -93,6 +106,13 @@ export default function Canvas() {
                 ),
               );
             },
+
+            onDelete: (id: string) => {
+              setNodes((nds) => nds.filter((n) => n.id !== id));
+              setEdges((eds) =>
+                eds.filter((edge) => edge.source !== id && edge.target !== id),
+              );
+            },
           },
         };
 
@@ -123,11 +143,14 @@ export default function Canvas() {
         edges={edges}
         nodeTypes={nodeTypes}
         connectionMode={ConnectionMode.Loose}
+        minZoom={0.1}
+        maxZoom={4}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onPaneClick={onPaneClick}
         onEdgeClick={onEdgeClick}
+        onNodesDelete={onNodesDelete}
         zoomOnDoubleClick={false}
         onInit={(instance) => (reactFlowInstance.current = instance)}
         fitView

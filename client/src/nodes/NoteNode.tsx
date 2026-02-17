@@ -14,6 +14,7 @@ export type NoteData = {
   onChange: (nodeId: string, value: string) => void;
   onStopEditing: (nodeId: string) => void;
   onStartEditing: (nodeId: string) => void;
+  onDelete?: (nodeId: string) => void;
 };
 
 export type NoteNodeType = Node<NoteData, "note">;
@@ -98,6 +99,33 @@ export default function NoteNode({
           border: "none",
         }}
       />
+      {selected && (
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            data.onDelete?.(id);
+          }}
+          style={{
+            position: "absolute",
+            top: 2,
+            right: 2,
+            width: 16,
+            height: 16,
+            borderRadius: 3,
+            background: "transparent",
+            color: "#111",
+            fontSize: 14,
+            fontWeight: 600,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            lineHeight: 1,
+          }}
+        >
+          ×
+        </div>
+      )}
 
       <Handle
         id="top"
