@@ -70,6 +70,12 @@ export default function Canvas() {
     },
     [setNodes],
   );
+  const onEdgeClick = useCallback(
+    (_event: React.MouseEvent, edge: Edge) => {
+      setEdges((eds) => eds.filter((e) => e.id !== edge.id));
+    },
+    [setEdges],
+  );
 
   return (
     <div
@@ -88,6 +94,7 @@ export default function Canvas() {
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onPaneClick={onPaneClick}
+        onEdgeClick={onEdgeClick}
         zoomOnDoubleClick={false}
         onInit={(instance) => (reactFlowInstance.current = instance)}
         fitView
