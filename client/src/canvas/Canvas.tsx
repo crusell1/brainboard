@@ -7,11 +7,14 @@ import {
   MiniMap,
   useNodesState,
   useEdgesState,
+  ConnectionMode,
   type Connection,
   type Node,
   type Edge,
   type ReactFlowInstance,
 } from "@xyflow/react";
+
+import NoteNode from "../nodes/NoteNode";
 
 let id = 0;
 const getId = () => `node_${id++}`;
@@ -22,6 +25,10 @@ const NODE_HEIGHT = 40;
 export default function Canvas() {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const nodeTypes = {
+    note: NoteNode,
+  };
+
   const reactFlowInstance = useRef<ReactFlowInstance | null>(null);
 
   const lastClick = useRef<number>(0);
@@ -53,7 +60,7 @@ export default function Canvas() {
           id: getId(),
           position: centeredPosition,
           data: { label: "New Node" },
-          type: "default",
+          type: "note",
         };
 
         setNodes((nds) => [...nds, newNode]);
@@ -75,6 +82,8 @@ export default function Canvas() {
       <ReactFlow
         nodes={nodes}
         edges={edges}
+        nodeTypes={nodeTypes}
+        connectionMode={ConnectionMode.Loose}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
