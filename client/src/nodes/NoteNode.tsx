@@ -1,5 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
+import {
+  Handle,
+  Position,
+  NodeResizer,
+  useUpdateNodeInternals,
+  type Node,
+  type NodeProps,
+} from "@xyflow/react";
 
 export type NoteData = {
   label: string;
@@ -18,6 +25,7 @@ export default function NoteNode({
 }: NodeProps<NoteNodeType>) {
   const [value, setValue] = useState(data.label ?? "");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const updateNodeInternals = useUpdateNodeInternals();
 
   useEffect(() => {
     setValue(data.label ?? "");
@@ -37,9 +45,13 @@ export default function NoteNode({
     data.onStopEditing(id);
   };
   const autoResize = () => {
-    if (!textareaRef.current) return;
-    textareaRef.current.style.height = "auto";
-    textareaRef.current.style.height = textareaRef.current.scrollHeight + "px";
+    const el = textareaRef.current;
+    if (!el) return;
+
+    el.style.height = "auto";
+    el.style.height = el.scrollHeight + "px";
+
+    updateNodeInternals(id); // 👈 HÄR
   };
 
   // ✅ Tydlig style så handles syns på vit node
@@ -57,8 +69,10 @@ export default function NoteNode({
         data.onStartEditing(id);
       }}
       style={{
-        width: 220,
-        minHeight: 80,
+        minWidth: 150,
+        minHeight: 60,
+        width: "100%",
+        height: "100%", // 🔥 VIKTIGT
         padding: 16,
         borderRadius: 16,
         background: "#f1f1f1",
@@ -66,8 +80,25 @@ export default function NoteNode({
         boxShadow: "0 8px 20px rgba(0,0,0,0.15)",
         boxSizing: "border-box",
         position: "relative",
+        display: "flex", // 🔥
+        flexDirection: "column", // 🔥
       }}
     >
+      <NodeResizer
+        isVisible={true}
+        minWidth={150}
+        minHeight={60}
+        handleStyle={{
+          width: 8,
+          height: 8,
+          background: "transparent",
+          border: "none",
+        }}
+        lineStyle={{
+          border: "none",
+        }}
+      />
+
       <Handle
         id="top"
         type="source"
@@ -100,14 +131,12 @@ export default function NoteNode({
         <textarea
           ref={textareaRef}
           value={value}
-          onChange={(e) => {
-            setValue(e.target.value);
-            autoResize();
-          }}
+          onChange={(e) => setValue(e.target.value)}
           onBlur={stopEdit}
           style={{
             width: "100%",
-            minHeight: 40,
+            height: "100%",
+            flex: 1,
             borderRadius: 12,
             border: "none",
             outline: "none",
@@ -117,6 +146,10 @@ export default function NoteNode({
             color: "white",
             fontSize: 14,
             boxSizing: "border-box",
+
+            wordBreak: "break-word",
+            overflowWrap: "break-word",
+            whiteSpace: "pre-wrap",
             overflow: "hidden",
           }}
         />
@@ -124,16 +157,19 @@ export default function NoteNode({
         <div
           style={{
             width: "100%",
-            minHeight: 40,
+            height: "100%",
+            flex: 1,
             borderRadius: 12,
             padding: 12,
             background: "#3a3a3a",
             color: "white",
             fontSize: 14,
             boxSizing: "border-box",
-            whiteSpace: "pre-wrap",
+
             wordBreak: "break-word",
-            overflowWrap: "anywhere",
+            overflowWrap: "break-word",
+            whiteSpace: "pre-wrap",
+            overflow: "hidden",
           }}
         >
           {value}
