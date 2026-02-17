@@ -24,15 +24,87 @@ const NODE_HEIGHT = 40;
 
 type Snapshot = { nodes: Node[]; edges: Edge[] };
 
+type StoredNode = {
+  id: string;
+  type?: string;
+  position: { x: number; y: number };
+  width?: number;
+  height?: number;
+  data?: { label?: unknown };
+};
+
+type StoredState = {
+  nodes: StoredNode[];
+  edges: Edge[];
+  viewport?: {
+    x: number;
+    y: number;
+    zoom: number;
+  };
+};
+
+function loadInitialState(): StoredState {
+  try {
+    const saved = localStorage.getItem("brainboard");
+    if (!saved) return { nodes: [], edges: [] };
+
+    const parsed = JSON.parse(saved);
+
+    const nodes = (parsed.nodes || []) as StoredNode[];
+    const edges = (parsed.edges || []) as Edge[];
+    const viewport = parsed.viewport;
+
+    // Uppdatera id-räknaren så vi inte krockar
+    const ids = nodes
+      .map((n) => {
+        const m = String(n.id).match(/^node_(\d+)$/);
+        return m ? Number(m[1]) : -1;
+      })
+      .filter((n) => n >= 0);
+
+    if (ids.length > 0) id = Math.max(...ids) + 1;
+
+    return { nodes, edges, viewport };
+  } catch {
+    return { nodes: [], edges: [] };
+  }
+}
+
 export default function Canvas() {
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  // 🔥 Läs localStorage innan states initieras (stabilt, ingen race)
+  const initial = useRef<StoredState>(loadInitialState());
+
+  const storedNodes = initial.current.nodes.map((n) => ({
+    id: n.id,
+    type: n.type ?? "note",
+    position: n.position,
+    width: n.width,
+    height: n.height,
+    data: {
+      label: typeof n.data?.label === "string" ? n.data.label : "",
+      isEditing: false,
+    },
+  }));
+
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(storedNodes);
+
+  const storedEdges = initial.current.edges || [];
+
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(storedEdges);
+
   const nodeTypes = { note: NoteNode };
 
   const [history, setHistory] = useState<Snapshot[]>([
     { nodes: [], edges: [] },
   ]);
   const [historyIndex, setHistoryIndex] = useState(0);
+
+  const reactFlowInstance = useRef<ReactFlowInstance | null>(null);
+  const lastClick = useRef<number>(0);
+
+  /* =========================
+     HISTORY HELPERS
+  ========================== */
 
   const saveSnapshot = (nextNodes: Node[], nextEdges: Edge[]) => {
     const newHistory = history.slice(0, historyIndex + 1);
@@ -57,6 +129,12 @@ export default function Canvas() {
     setEdges(history[newIndex].edges);
   };
 
+  // Initiera history från initialt laddade data (så ctrl+z känns rätt)
+  useEffect(() => {
+    saveSnapshot(nodes, edges);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey) {
@@ -74,8 +152,99 @@ export default function Canvas() {
     return () => window.removeEventListener("keydown", handler);
   });
 
-  const reactFlowInstance = useRef<ReactFlowInstance | null>(null);
-  const lastClick = useRef<number>(0);
+  /* =========================
+     NODE HANDLERS
+  ========================== */
+
+  const updateNodeLabel = (nodeId: string, value: string) => {
+    setNodes((nds) => {
+      const updated = nds.map((node) =>
+        node.id === nodeId
+          ? { ...node, data: { ...node.data, label: value } }
+          : node,
+      );
+      saveSnapshot(updated, edges);
+      return updated;
+    });
+  };
+
+  const startEditing = (nodeId: string) => {
+    setNodes((nds) =>
+      nds.map((node) =>
+        node.id === nodeId
+          ? { ...node, data: { ...node.data, isEditing: true } }
+          : node,
+      ),
+    );
+  };
+
+  const stopEditing = (nodeId: string) => {
+    setNodes((nds) =>
+      nds.map((node) =>
+        node.id === nodeId
+          ? { ...node, data: { ...node.data, isEditing: false } }
+          : node,
+      ),
+    );
+  };
+
+  const deleteNode = (nodeId: string) => {
+    setNodes((nds) => {
+      const updated = nds.filter((node) => node.id !== nodeId);
+      saveSnapshot(updated, edges);
+      return updated;
+    });
+
+    // ta även bort edges kopplade till noden
+    setEdges((eds) => {
+      const updated = eds.filter(
+        (e) => e.source !== nodeId && e.target !== nodeId,
+      );
+      saveSnapshot(nodes, updated);
+      return updated;
+    });
+  };
+
+  const createNodeWithHandlers = (node: Node): Node => ({
+    ...node,
+    data: {
+      ...node.data,
+      onChange: updateNodeLabel,
+      onStartEditing: startEditing,
+      onStopEditing: stopEditing,
+      onDelete: deleteNode,
+    },
+  });
+
+  /* =========================
+     PERSISTENCE (SAVE)
+  ========================== */
+
+  useEffect(() => {
+    const cleanNodes: StoredNode[] = nodes.map((node) => ({
+      id: node.id,
+      type: node.type,
+      position: node.position,
+      width: node.width,
+      height: node.height,
+      data: { label: node.data?.label ?? "" },
+    }));
+
+    const viewport = reactFlowInstance.current?.getViewport();
+
+    localStorage.setItem(
+      "brainboard",
+      JSON.stringify({
+        nodes: cleanNodes,
+        edges,
+        viewport,
+      }),
+    );
+  }, [nodes, edges]);
+
+  /* =========================
+     FLOW EVENTS
+  ========================== */
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -116,12 +285,18 @@ export default function Canvas() {
           y: flowPosition.y - NODE_HEIGHT / 2,
         };
 
-        const newNode: Node = {
+        const newNode: Node = createNodeWithHandlers({
           id: getId(),
           type: "note",
           position: centeredPosition,
-          data: { label: "", isEditing: false },
-        };
+          data: {
+            label: "",
+            isEditing: true,
+          },
+          style: {
+            width: 150,
+          },
+        });
 
         setNodes((nds) => {
           const updated = [...nds, newNode];
@@ -138,7 +313,7 @@ export default function Canvas() {
   return (
     <div style={{ width: "100vw", height: "100vh", background: "#111111" }}>
       <ReactFlow
-        nodes={nodes}
+        nodes={nodes.map(createNodeWithHandlers)}
         edges={edges}
         nodeTypes={nodeTypes}
         connectionMode={ConnectionMode.Loose}
@@ -147,11 +322,20 @@ export default function Canvas() {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
-        onPaneClick={onPaneClick}
         onEdgeClick={onEdgeClick}
+        onPaneClick={onPaneClick}
         zoomOnDoubleClick={false}
-        onInit={(instance) => (reactFlowInstance.current = instance)}
-        fitView
+        onInit={(instance) => {
+          reactFlowInstance.current = instance;
+
+          const saved = initial.current.viewport;
+
+          if (saved) {
+            setTimeout(() => {
+              instance.setViewport(saved);
+            }, 0);
+          }
+        }}
       >
         <MiniMap />
         <Controls />
