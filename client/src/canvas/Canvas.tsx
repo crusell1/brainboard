@@ -56,11 +56,44 @@ export default function Canvas() {
           y: flowPosition.y - NODE_HEIGHT / 2,
         };
 
+        const nodeId = getId();
+
         const newNode: Node = {
-          id: getId(),
-          position: centeredPosition,
-          data: { label: "New Node" },
+          id: nodeId,
           type: "note",
+          position: centeredPosition,
+          data: {
+            label: "",
+            isEditing: false,
+
+            onChange: (id: string, value: string) => {
+              setNodes((nds) =>
+                nds.map((n) =>
+                  n.id === id ? { ...n, data: { ...n.data, label: value } } : n,
+                ),
+              );
+            },
+
+            onStartEditing: (id: string) => {
+              setNodes((nds) =>
+                nds.map((n) =>
+                  n.id === id
+                    ? { ...n, data: { ...n.data, isEditing: true } }
+                    : n,
+                ),
+              );
+            },
+
+            onStopEditing: (id: string) => {
+              setNodes((nds) =>
+                nds.map((n) =>
+                  n.id === id
+                    ? { ...n, data: { ...n.data, isEditing: false } }
+                    : n,
+                ),
+              );
+            },
+          },
         };
 
         setNodes((nds) => [...nds, newNode]);

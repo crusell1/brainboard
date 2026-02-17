@@ -26,6 +26,7 @@ export default function NoteNode({
   useEffect(() => {
     if (data.isEditing && textareaRef.current) {
       textareaRef.current.focus();
+      autoResize();
       const len = textareaRef.current.value.length;
       textareaRef.current.setSelectionRange(len, len);
     }
@@ -34,6 +35,11 @@ export default function NoteNode({
   const stopEdit = () => {
     data.onChange(id, value);
     data.onStopEditing(id);
+  };
+  const autoResize = () => {
+    if (!textareaRef.current) return;
+    textareaRef.current.style.height = "auto";
+    textareaRef.current.style.height = textareaRef.current.scrollHeight + "px";
   };
 
   // ✅ Tydlig style så handles syns på vit node
@@ -94,7 +100,10 @@ export default function NoteNode({
         <textarea
           ref={textareaRef}
           value={value}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => {
+            setValue(e.target.value);
+            autoResize();
+          }}
           onBlur={stopEdit}
           style={{
             width: "100%",
@@ -108,6 +117,7 @@ export default function NoteNode({
             color: "white",
             fontSize: 14,
             boxSizing: "border-box",
+            overflow: "hidden",
           }}
         />
       ) : (
@@ -122,6 +132,8 @@ export default function NoteNode({
             fontSize: 14,
             boxSizing: "border-box",
             whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+            overflowWrap: "anywhere",
           }}
         >
           {value}
