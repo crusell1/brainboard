@@ -1,8 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./lib/supabase";
 import Auth from "./components/Auth";
-import Canvas from "./canvas/Canvas";
+
+const Canvas = lazy(() => import("./canvas/Canvas"));
 
 function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -49,7 +50,15 @@ function App() {
           left: 0,
         }}
       >
-        <Canvas />
+        <Suspense
+          fallback={
+            <div style={{ color: "#888", padding: 20 }}>
+              Laddar BrainBoard...
+            </div>
+          }
+        >
+          <Canvas />
+        </Suspense>
       </div>
     </>
   );
