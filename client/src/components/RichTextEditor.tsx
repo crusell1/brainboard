@@ -191,12 +191,15 @@ export default function RichTextEditor({
   }, [isEditing, isListening, stopListening]);
 
   // Lyssna på inkommande text från Web Speech API
+  const lastProcessedText = useRef(""); // 🔥 Skydd mot dubbletter
+
   useEffect(() => {
-    if (transcript && editor) {
+    if (transcript && editor && transcript !== lastProcessedText.current) {
       console.log("📝 Infogar text i editor:", transcript);
       // Infoga texten vid markören och lägg till ett mellanslag
       editor.chain().focus().insertContent(`${transcript} `).run();
 
+      lastProcessedText.current = transcript;
       // Rensa transcript i hooken så vi inte infogar samma text igen
       resetTranscript();
     }

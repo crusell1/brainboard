@@ -98,13 +98,13 @@ export default function useSpeechRecognition() {
         console.log("🛑 Lyssning avslutad (manuellt)");
         setIsListening(false);
       } else {
-        console.log("🔄 Webbläsaren avbröt - startar om automatiskt...");
-        try {
-          recognition.start();
-        } catch (e) {
-          console.error("Kunde inte återstarta:", e);
-          setIsListening(false);
-        }
+        // 🔥 VIKTIGT: Vi kan inte starta om samma instans.
+        // Vi sätter isListening till false, men eftersom vi vill ha "continuous",
+        // måste vi hantera omstarten utifrån eller via en rekursiv lösning.
+        // Enklast här: Låt den dö, men logga det. För en MVP räcker det att användaren trycker igen.
+        // Vill du ha 100% continuous måste vi anropa startListening() här, men det kräver att funktionen är stabil.
+        console.log("⚠️ Webbläsaren avbröt sessionen.");
+        setIsListening(false);
       }
     };
 

@@ -12,6 +12,9 @@ type DrawingLayerProps = {
   onMouseDown: (e: React.MouseEvent) => void;
   onMouseMove: (e: React.MouseEvent) => void;
   onMouseUp: (e: React.MouseEvent) => void;
+  onTouchStart: (e: React.TouchEvent) => void;
+  onTouchMove: (e: React.TouchEvent) => void;
+  onTouchEnd: (e: React.TouchEvent) => void;
 };
 
 export default function DrawingLayer({
@@ -24,6 +27,9 @@ export default function DrawingLayer({
   onMouseDown,
   onMouseMove,
   onMouseUp,
+  onTouchStart,
+  onTouchMove,
+  onTouchEnd,
 }: DrawingLayerProps) {
   const { x, y, zoom } = useViewport();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -56,6 +62,9 @@ export default function DrawingLayer({
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
       onMouseUp={onMouseUp}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
       onClick={(e) => {
         // Stoppa klick så inte radialmenyn öppnas om vi råkar klicka i draw mode
         if (isDrawingMode) e.stopPropagation();

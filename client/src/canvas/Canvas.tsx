@@ -872,19 +872,29 @@ export default function Canvas() {
   ========================== */
 
   const onDrawingMouseDown = useCallback(
-    (e: React.MouseEvent) => {
+    (e: React.MouseEvent | React.TouchEvent) => {
       // Rita endast med vänsterklick (button 0) och om draw mode är aktivt
       if (!isDrawingMode || !reactFlowInstance) return;
 
-      // Om det inte är vänsterklick (t.ex. mittenklick för pan), låt det bubbla till React Flow
-      if (e.button !== 0) return;
+      let clientX, clientY;
+
+      if ("touches" in e) {
+        // Touch event
+        clientX = e.touches[0].clientX;
+        clientY = e.touches[0].clientY;
+      } else {
+        // Mouse event - kolla vänsterklick
+        if (e.button !== 0) return;
+        clientX = e.clientX;
+        clientY = e.clientY;
+      }
 
       // Stoppa propagation så inte React Flow börjar markera/panorera
       e.stopPropagation();
 
       const point = reactFlowInstance.screenToFlowPosition({
-        x: e.clientX,
-        y: e.clientY,
+        x: clientX,
+        y: clientY,
       });
       setIsDrawing(true);
       setCurrentPoints([point]);
@@ -893,14 +903,23 @@ export default function Canvas() {
   );
 
   const onDrawingMouseMove = useCallback(
-    (e: React.MouseEvent) => {
+    (e: React.MouseEvent | React.TouchEvent) => {
       if (!isDrawing || !reactFlowInstance) return;
 
       e.stopPropagation(); // Förhindra hover-effekter på noder under
 
+      let clientX, clientY;
+      if ("touches" in e) {
+        clientX = e.touches[0].clientX;
+        clientY = e.touches[0].clientY;
+      } else {
+        clientX = e.clientX;
+        clientY = e.clientY;
+      }
+
       const point = reactFlowInstance.screenToFlowPosition({
-        x: e.clientX,
-        y: e.clientY,
+        x: clientX,
+        y: clientY,
       });
       setCurrentPoints((prev) => [...prev, point]);
     },
@@ -908,7 +927,7 @@ export default function Canvas() {
   );
 
   const onDrawingMouseUp = useCallback(
-    (e: React.MouseEvent) => {
+    (e: React.MouseEvent | React.TouchEvent) => {
       if (!isDrawing) return;
 
       e.stopPropagation(); // Förhindra att klicket går vidare (t.ex. onPaneClick)
@@ -1225,6 +1244,9 @@ export default function Canvas() {
           onMouseDown={onDrawingMouseDown}
           onMouseMove={onDrawingMouseMove}
           onMouseUp={onDrawingMouseUp}
+          onTouchStart={onDrawingMouseDown}
+          onTouchMove={onDrawingMouseMove}
+          onTouchEnd={onDrawingMouseUp}
         />
 
         {/* Ge Controls högre z-index än DrawingLayer (1500) så knapparna går att klicka på */}

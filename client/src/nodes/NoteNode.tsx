@@ -121,6 +121,7 @@ export default function NoteNode({
   const containerRef = useRef<HTMLDivElement>(null);
   const [showTagMenu, setShowTagMenu] = useState(false);
   const [customTag, setCustomTag] = useState("");
+  const isResizingRef = useRef(false); // 🔥 Håll koll på om vi drar manuellt
 
   const toggleTag = (tag: string) => {
     const currentTags = data.tags || [];
@@ -161,6 +162,9 @@ export default function NoteNode({
     if (!containerRef.current) return;
 
     const checkSize = () => {
+      // Om användaren håller på att ändra storlek manuellt, gör inget auto-resize!
+      if (isResizingRef.current) return;
+
       // Vi mäter containerns scrollHeight direkt eftersom Tiptap expanderar den
       const contentHeight = containerRef.current!.scrollHeight;
       // Ingen extra buffer behövs om vi mäter containern direkt, men vi sätter en min-höjd
@@ -297,11 +301,15 @@ export default function NoteNode({
         isVisible={selected} // Visa bara handles när noden är vald (snyggare)
         minWidth={300}
         minHeight={150}
+        onResizeStart={() => {
+          isResizingRef.current = true; // 🔥 Pausa auto-resize
+        }}
         onResize={(_e, params) => {
           // Uppdatera bara visuellt medan vi drar (snabbt)
           data.onResize?.(id, params.width, params.height);
         }}
         onResizeEnd={(_e, params) => {
+          isResizingRef.current = false; // 🔥 Återaktivera auto-resize
           // Spara till DB när vi släpper (förhindrar lagg)
           data.onResizeEnd?.(id, params.width, params.height);
         }}
