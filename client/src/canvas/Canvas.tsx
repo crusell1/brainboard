@@ -13,84 +13,18 @@ import {
   type Edge,
   type ReactFlowInstance,
 } from "@xyflow/react";
-
+import { supabase } from "../lib/supabase";
+import type { Note, DbEdge } from "../types/database";
 import NoteNode from "../nodes/NoteNode";
 
-let id = 0;
-const getId = () => `node_${id++}`;
-
-const NODE_WIDTH = 150;
-const NODE_HEIGHT = 40;
+const NODE_WIDTH = 200;
+const NODE_HEIGHT = 100;
 
 type Snapshot = { nodes: Node[]; edges: Edge[] };
 
-type StoredNode = {
-  id: string;
-  type?: string;
-  position: { x: number; y: number };
-  width?: number;
-  height?: number;
-  data?: { label?: unknown };
-};
-
-type StoredState = {
-  nodes: StoredNode[];
-  edges: Edge[];
-  viewport?: {
-    x: number;
-    y: number;
-    zoom: number;
-  };
-};
-
-function loadInitialState(): StoredState {
-  try {
-    const saved = localStorage.getItem("brainboard");
-    if (!saved) return { nodes: [], edges: [] };
-
-    const parsed = JSON.parse(saved);
-
-    const nodes = (parsed.nodes || []) as StoredNode[];
-    const edges = (parsed.edges || []) as Edge[];
-    const viewport = parsed.viewport;
-
-    // Uppdatera id-räknaren så vi inte krockar
-    const ids = nodes
-      .map((n) => {
-        const m = String(n.id).match(/^node_(\d+)$/);
-        return m ? Number(m[1]) : -1;
-      })
-      .filter((n) => n >= 0);
-
-    if (ids.length > 0) id = Math.max(...ids) + 1;
-
-    return { nodes, edges, viewport };
-  } catch {
-    return { nodes: [], edges: [] };
-  }
-}
-
 export default function Canvas() {
-  // 🔥 Läs localStorage innan states initieras (stabilt, ingen race)
-  const initial = useRef<StoredState>(loadInitialState());
-
-  const storedNodes = initial.current.nodes.map((n) => ({
-    id: n.id,
-    type: n.type ?? "note",
-    position: n.position,
-    width: n.width,
-    height: n.height,
-    data: {
-      label: typeof n.data?.label === "string" ? n.data.label : "",
-      isEditing: false,
-    },
-  }));
-
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(storedNodes);
-
-  const storedEdges = initial.current.edges || [];
-
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(storedEdges);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
   const nodeTypes = { note: NoteNode };
 
@@ -101,6 +35,223 @@ export default function Canvas() {
 
   const reactFlowInstance = useRef<ReactFlowInstance | null>(null);
   const lastClick = useRef<number>(0);
+
+  /* =========================
+     SUPABASE INTEGRATION
+  ========================== */
+
+  // 1. Hämta data (noder och edges) vid start
+  useEffect(() => {
+    const fetchNodes = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.user) return;
+
+      // Hämta noder
+      const { data, error } = await supabase
+        .from("nodes")
+        .select("*")
+        .eq("user_id", session.user.id);
+
+      if (error) {
+        console.error("Error fetching nodes:", error);
+        return;
+      }
+
+      if (data) {
+        const loadedNodes = data.map((n: Note) => ({
+          id: n.id,
+          type: "note",
+          position: { x: n.position_x, y: n.position_y },
+          style: {
+            width: n.width ?? 200, // 🔥 Fix: Standardvärde om null
+            height: n.height ?? 100,
+          },
+          data: {
+            title: n.title ?? "",
+            label: n.content,
+            color: n.color ?? "#f1f1f1",
+            isEditing: false,
+          },
+        }));
+        setNodes(loadedNodes);
+      }
+
+      // Hämta edges
+      const { data: edgeData, error: edgeError } = await supabase
+        .from("edges")
+        .select("*")
+        .eq("user_id", session.user.id);
+
+      if (edgeError) console.error("Error fetching edges:", edgeError);
+
+      if (edgeData) {
+        const loadedEdges = edgeData.map((e: DbEdge) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+        }));
+        setEdges(loadedEdges);
+      }
+    };
+
+    fetchNodes();
+  }, [setNodes]);
+
+  // 1.5 Realtime Subscription (Synk mellan flikar)
+  useEffect(() => {
+    const channel = supabase
+      .channel("brainboard-sync")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "nodes" },
+        (payload) => {
+          if (payload.eventType === "INSERT") {
+            const newNote = payload.new as Note;
+            setNodes((nds) => {
+              // Undvik dubbletter om vi själva skapade den
+              if (nds.some((n) => n.id === newNote.id)) return nds;
+              return [
+                ...nds,
+                {
+                  id: newNote.id,
+                  type: "note",
+                  position: { x: newNote.position_x, y: newNote.position_y },
+                  style: { width: newNote.width, height: newNote.height },
+                  data: {
+                    title: newNote.title,
+                    label: newNote.content,
+                    color: newNote.color,
+                    isEditing: false,
+                  },
+                } as Node,
+              ];
+            });
+          }
+          if (payload.eventType === "UPDATE") {
+            const newNote = payload.new as Note;
+            setNodes((nds) =>
+              nds.map((n) =>
+                n.id === newNote.id
+                  ? {
+                      ...n,
+                      position: {
+                        x: newNote.position_x,
+                        y: newNote.position_y,
+                      },
+                      style: {
+                        ...n.style,
+                        width: newNote.width,
+                        height: newNote.height,
+                      },
+                      data: {
+                        ...n.data,
+                        title: newNote.title,
+                        label: newNote.content,
+                        color: newNote.color,
+                      },
+                    }
+                  : n,
+              ),
+            );
+          }
+          if (payload.eventType === "DELETE") {
+            setNodes((nds) => nds.filter((n) => n.id !== payload.old.id));
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [setNodes]);
+
+  // 2. Skapa nod i DB
+  const createNodeInDb = useCallback(async (node: Node) => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session?.user) return;
+
+    const { error } = await supabase.from("nodes").insert({
+      id: node.id,
+      user_id: session.user.id,
+      position_x: node.position.x,
+      position_y: node.position.y,
+      content: node.data.label,
+      title: node.data.title ?? "",
+      width: node.style?.width ?? 200,
+      height: node.style?.height ?? 100,
+      color: node.data.color ?? "#f1f1f1",
+    });
+
+    if (error) console.error("Error creating node:", error);
+    else console.log("Skapade nod i DB:", node.id);
+  }, []);
+
+  // 3. Spara (Uppdatera) nod i DB
+  const saveNodeToDb = useCallback(
+    async (node: Node) => {
+      const { data, error } = await supabase
+        .from("nodes")
+        .update({
+          position_x: node.position.x,
+          position_y: node.position.y,
+          content: node.data.label,
+          title: node.data.title,
+          width: node.style?.width,
+          height: node.style?.height,
+          color: node.data.color,
+          // Vi skickar med updated_at för att vara säkra på att Supabase ser ändringen
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", node.id)
+        .select(); // Vi ber om data tillbaka för att se om något uppdaterades
+
+      if (error) {
+        console.error("Error updating node:", error);
+      } else if (data.length === 0) {
+        // Om ingen rad uppdaterades, fanns inte noden. Skapa den nu!
+        console.warn("Noden fanns inte, skapar den nu:", node.id);
+        await createNodeInDb(node);
+      } else {
+        console.log(
+          `Sparade nod ${node.id}: ${node.style?.width}x${node.style?.height}`,
+        );
+      }
+    },
+    [createNodeInDb],
+  );
+
+  // 4. Ta bort nod från DB
+  const deleteNodeFromDb = useCallback(async (nodeId: string) => {
+    const { error } = await supabase.from("nodes").delete().eq("id", nodeId);
+    if (error) console.error("Error deleting node:", error);
+  }, []);
+
+  // 5. Skapa Edge i DB
+  const createEdgeInDb = async (edge: Edge) => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session?.user) return;
+
+    const { error } = await supabase.from("edges").insert({
+      id: edge.id,
+      user_id: session.user.id,
+      source: edge.source,
+      target: edge.target,
+    });
+    if (error) console.error("Error creating edge:", error);
+  };
+
+  // 6. Ta bort Edge från DB
+  const deleteEdgeFromDb = async (edgeId: string) => {
+    const { error } = await supabase.from("edges").delete().eq("id", edgeId);
+    if (error) console.error("Error deleting edge:", error);
+  };
 
   /* =========================
      HISTORY HELPERS
@@ -119,6 +270,8 @@ export default function Canvas() {
     setHistoryIndex(newIndex);
     setNodes(history[newIndex].nodes);
     setEdges(history[newIndex].edges);
+    // Obs: Undo/Redo sparar inte automatiskt till DB i denna version för att spara prestanda,
+    // men man skulle kunna lägga till en saveNodeToDb här för alla påverkade noder.
   };
 
   const redo = () => {
@@ -128,12 +281,6 @@ export default function Canvas() {
     setNodes(history[newIndex].nodes);
     setEdges(history[newIndex].edges);
   };
-
-  // Initiera history från initialt laddade data (så ctrl+z känns rätt)
-  useEffect(() => {
-    saveSnapshot(nodes, edges);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -157,15 +304,32 @@ export default function Canvas() {
   ========================== */
 
   const updateNodeLabel = (nodeId: string, value: string) => {
-    setNodes((nds) => {
-      const updated = nds.map((node) =>
-        node.id === nodeId
-          ? { ...node, data: { ...node.data, label: value } }
-          : node,
-      );
-      saveSnapshot(updated, edges);
-      return updated;
+    // 🔥 FIX: Beräkna nya noder först, sen spara. Inga side-effects i setNodes!
+    const updatedNodes = nodes.map((node) => {
+      if (node.id === nodeId) {
+        const newNode = { ...node, data: { ...node.data, label: value } };
+        saveNodeToDb(newNode); // Spara till DB
+        return newNode;
+      }
+      return node;
     });
+
+    setNodes(updatedNodes);
+    saveSnapshot(updatedNodes, edges);
+  };
+
+  const updateNodeTitle = (nodeId: string, title: string) => {
+    setNodes((nds) =>
+      nds.map((node) => {
+        if (node.id === nodeId) {
+          const newNode = { ...node, data: { ...node.data, title } };
+          saveNodeToDb(newNode);
+          return newNode;
+        }
+        return node;
+      }),
+    );
+    // Vi sparar inte snapshot för varje bokstav i titeln, onBlur sköter DB-sparandet
   };
 
   const startEditing = (nodeId: string) => {
@@ -189,58 +353,79 @@ export default function Canvas() {
   };
 
   const deleteNode = (nodeId: string) => {
-    setNodes((nds) => {
-      const updated = nds.filter((node) => node.id !== nodeId);
-      saveSnapshot(updated, edges);
-      return updated;
-    });
+    deleteNodeFromDb(nodeId); // Ta bort från DB
 
-    // ta även bort edges kopplade till noden
-    setEdges((eds) => {
-      const updated = eds.filter(
-        (e) => e.source !== nodeId && e.target !== nodeId,
-      );
-      saveSnapshot(nodes, updated);
-      return updated;
-    });
+    // 🔥 FIX: Beräkna nya noder och edges utanför set-funktionen
+    const updatedNodes = nodes.filter((node) => node.id !== nodeId);
+    const updatedEdges = edges.filter(
+      (e) => e.source !== nodeId && e.target !== nodeId,
+    );
+
+    setNodes(updatedNodes);
+    setEdges(updatedEdges);
+    saveSnapshot(updatedNodes, updatedEdges);
   };
 
-  const createNodeWithHandlers = (node: Node): Node => ({
-    ...node,
-    data: {
-      ...node.data,
-      onChange: updateNodeLabel,
-      onStartEditing: startEditing,
-      onStopEditing: stopEditing,
-      onDelete: deleteNode,
+  const onResize = useCallback(
+    (nodeId: string, width: number, height: number) => {
+      setNodes((nds) => {
+        const node = nds.find((n) => n.id === nodeId);
+        if (node) {
+          const updatedNode = {
+            ...node,
+            style: { ...node.style, width, height },
+          };
+          // Vi sparar här inne för att vara 100% säkra på att vi har rätt version av noden
+          console.log("Resize: Sparar till DB...", width, height);
+          saveNodeToDb(updatedNode);
+          return nds.map((n) => (n.id === nodeId ? updatedNode : n));
+        }
+        return nds;
+      });
     },
-  });
+    [saveNodeToDb, setNodes],
+  );
 
-  /* =========================
-     PERSISTENCE (SAVE)
-  ========================== */
+  const onColorChange = useCallback(
+    (nodeId: string, color: string) => {
+      setNodes((nds) =>
+        nds.map((node) => {
+          if (node.id === nodeId) {
+            const updated = { ...node, data: { ...node.data, color } };
+            saveNodeToDb(updated);
+            return updated;
+          }
+          return node;
+        }),
+      );
+    },
+    [saveNodeToDb, setNodes],
+  );
 
-  useEffect(() => {
-    const cleanNodes: StoredNode[] = nodes.map((node) => ({
-      id: node.id,
-      type: node.type,
-      position: node.position,
-      width: node.width,
-      height: node.height,
-      data: { label: node.data?.label ?? "" },
-    }));
-
-    const viewport = reactFlowInstance.current?.getViewport();
-
-    localStorage.setItem(
-      "brainboard",
-      JSON.stringify({
-        nodes: cleanNodes,
-        edges,
-        viewport,
-      }),
-    );
-  }, [nodes, edges]);
+  const createNodeWithHandlers = useCallback(
+    (node: Node): Node => ({
+      ...node,
+      data: {
+        ...node.data,
+        onChange: updateNodeLabel,
+        onTitleChange: updateNodeTitle,
+        onStartEditing: startEditing,
+        onStopEditing: stopEditing,
+        onDelete: deleteNode,
+        onResize: onResize,
+        onColorChange: onColorChange,
+      },
+    }),
+    [
+      updateNodeTitle,
+      updateNodeLabel,
+      startEditing,
+      stopEditing,
+      deleteNode,
+      onResize,
+      onColorChange,
+    ],
+  );
 
   /* =========================
      FLOW EVENTS
@@ -248,24 +433,23 @@ export default function Canvas() {
 
   const onConnect = useCallback(
     (connection: Connection) => {
-      setEdges((eds) => {
-        const updated = addEdge(connection, eds);
-        saveSnapshot(nodes, updated);
-        return updated;
-      });
+      const newEdge = { ...connection, id: crypto.randomUUID() } as Edge;
+      const updatedEdges = addEdge(newEdge, edges);
+      setEdges(updatedEdges);
+      createEdgeInDb(newEdge); // Spara till DB
+      saveSnapshot(nodes, updatedEdges);
     },
-    [nodes, historyIndex],
+    [nodes, edges, historyIndex], // Lägg till edges i deps
   );
 
   const onEdgeClick = useCallback(
     (_event: React.MouseEvent, edge: Edge) => {
-      setEdges((eds) => {
-        const updated = eds.filter((e) => e.id !== edge.id);
-        saveSnapshot(nodes, updated);
-        return updated;
-      });
+      const updatedEdges = edges.filter((e) => e.id !== edge.id);
+      setEdges(updatedEdges);
+      deleteEdgeFromDb(edge.id); // Ta bort från DB
+      saveSnapshot(nodes, updatedEdges);
     },
-    [nodes, historyIndex],
+    [nodes, edges, historyIndex],
   );
 
   const onPaneClick = useCallback(
@@ -285,29 +469,40 @@ export default function Canvas() {
           y: flowPosition.y - NODE_HEIGHT / 2,
         };
 
-        const newNode: Node = createNodeWithHandlers({
-          id: getId(),
+        const newNode: Node = {
+          id: crypto.randomUUID(),
           type: "note",
           position: centeredPosition,
           data: {
+            title: "",
             label: "",
+            color: "#f1f1f1",
             isEditing: true,
           },
           style: {
-            width: 150,
+            width: 200,
+            height: 100, // Vi sätter en start-höjd också för säkerhets skull
           },
-        });
+        };
 
-        setNodes((nds) => {
-          const updated = [...nds, newNode];
-          saveSnapshot(updated, edges);
-          return updated;
-        });
+        createNodeInDb(newNode);
+
+        // 🔥 FIX
+        const updatedNodes = [...nodes, newNode];
+        setNodes(updatedNodes);
+        saveSnapshot(updatedNodes, edges);
       }
 
       lastClick.current = now;
     },
-    [edges, historyIndex],
+    [nodes, edges, historyIndex], // Lägg till nodes i deps
+  );
+
+  const onNodeDragStop = useCallback(
+    (_event: React.MouseEvent, node: Node) => {
+      saveNodeToDb(node);
+    },
+    [saveNodeToDb],
   );
 
   return (
@@ -324,17 +519,10 @@ export default function Canvas() {
         onConnect={onConnect}
         onEdgeClick={onEdgeClick}
         onPaneClick={onPaneClick}
+        onNodeDragStop={onNodeDragStop}
         zoomOnDoubleClick={false}
         onInit={(instance) => {
           reactFlowInstance.current = instance;
-
-          const saved = initial.current.viewport;
-
-          if (saved) {
-            setTimeout(() => {
-              instance.setViewport(saved);
-            }, 0);
-          }
         }}
       >
         <MiniMap />
