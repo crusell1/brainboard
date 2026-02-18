@@ -43,7 +43,6 @@ export default function Canvas() {
     Node,
     Edge
   > | null>(null);
-  const lastClick = useRef<number>(0);
   const containerRef = useRef<HTMLDivElement>(null);
   // 🔥 FIX: Använd useRef för timeout för att undvika race conditions vid dubbelklick
   const clickTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -911,39 +910,6 @@ export default function Canvas() {
       }, 300); // 🔥 FIX: Öka till 300ms för att inte blockera långsamma dubbelklick
     },
     [isDrawingMode, menuState.isOpen],
-  );
-
-  const onPaneDoubleClick = useCallback(
-    (event: React.MouseEvent) => {
-      // Avbryt enkelklick-menyn om vi dubbelklickar
-      if (clickTimeoutRef.current) {
-        clearTimeout(clickTimeoutRef.current);
-        clickTimeoutRef.current = null;
-      }
-
-      if (!reactFlowInstance) return;
-
-      const position = reactFlowInstance.screenToFlowPosition({
-        x: event.clientX,
-        y: event.clientY,
-      });
-
-      // Skapa nod centrerad på klicket
-      const newNode: Node = {
-        id: crypto.randomUUID(),
-        type: "note",
-        position: {
-          x: position.x - NODE_WIDTH / 2,
-          y: position.y - NODE_HEIGHT / 2,
-        },
-        data: { title: "", label: "", color: "#f1f1f1", isEditing: true },
-        style: { width: NODE_WIDTH, height: NODE_HEIGHT },
-      };
-
-      createNodeInDb(newNode);
-      setNodes((nds) => [...nds, newNode]);
-    },
-    [reactFlowInstance, createNodeInDb, setNodes],
   );
 
   const onNodeDragStop = useCallback(

@@ -1,4 +1,3 @@
-import React from "react";
 import { StickyNote, Image, Pen, Mic } from "lucide-react";
 
 type RadialMenuProps = {
