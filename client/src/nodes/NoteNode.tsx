@@ -241,6 +241,8 @@ export default function NoteNode({
         display: "flex",
         flexDirection: "column",
         overflow: "visible", // Viktigt för att glow ska synas utanför
+        touchAction: "none", // 🔥 FIX: Förhindra browser-zoom/pan på noden
+        willChange: "width, height", // 🔥 FIX: Hint till webbläsaren för prestanda
       }}
     >
       {/* Tags Display (Top Left Label) */}

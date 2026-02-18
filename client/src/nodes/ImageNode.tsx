@@ -73,6 +73,8 @@ export default function ImageNode({
         transition: "all 0.2s ease",
         background: "transparent",
         lineHeight: 0, // Tar bort extra utrymme under bilden
+        touchAction: "none", // 🔥 FIX: Förhindra browser-zoom/pan på noden
+        willChange: "width, height", // 🔥 FIX: Hint till webbläsaren för prestanda
       }}
     >
       <NodeResizer

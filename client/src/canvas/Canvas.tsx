@@ -574,7 +574,8 @@ export default function Canvas() {
   // 🔥 NY: Spara bara till DB när storleksändringen är KLAR (för prestanda)
   const onResizeEnd = useCallback(
     (nodeId: string, width: number, height: number) => {
-      const node = nodes.find((n) => n.id === nodeId);
+      // 🔥 OPTIMERING: Använd instansen istället för 'nodes' state för att slippa omrenderingar
+      const node = reactFlowInstance?.getNode(nodeId);
       if (node) {
         const updatedNode = {
           ...node,
@@ -584,7 +585,7 @@ export default function Canvas() {
         saveNodeToDb(updatedNode);
       }
     },
-    [nodes, saveNodeToDb],
+    [reactFlowInstance, saveNodeToDb],
   );
 
   const onColorChange = useCallback(

@@ -43,6 +43,7 @@ export default function useSpeechRecognition() {
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const [hasSupport, setHasSupport] = useState(false);
   const isStoppedManually = useRef(false); // 🔥 Håll koll på om VI stoppade den
+  const lastProcessedIndex = useRef(-1); // 🔥 Håll koll på vilket index vi senast tog emot
 
   useEffect(() => {
     setHasSupport(
@@ -70,6 +71,7 @@ export default function useSpeechRecognition() {
     }
 
     isStoppedManually.current = false; // Vi vill lyssna nu
+    lastProcessedIndex.current = -1; // Nollställ index för ny session
 
     // 2. Skapa en ny instans varje gång vi startar
     const recognition = new SpeechRecognition();
@@ -81,9 +83,11 @@ export default function useSpeechRecognition() {
       const lastResultIndex = event.results.length - 1;
       const lastResult = event.results[lastResultIndex];
 
-      if (lastResult.isFinal) {
+      // 🔥 FIX: Kolla att vi inte redan behandlat detta index
+      if (lastResult.isFinal && lastResultIndex > lastProcessedIndex.current) {
         const text = lastResult[0].transcript;
         console.log("🎤 Mottog text:", text);
+        lastProcessedIndex.current = lastResultIndex;
         setTranscript(text);
       }
     };
