@@ -24,6 +24,7 @@ export type NoteData = {
   onStartEditing: (nodeId: string) => void;
   onDelete?: (nodeId: string) => void;
   onResize?: (nodeId: string, width: number, height: number) => void;
+  onResizeEnd?: (nodeId: string, width: number, height: number) => void;
   onColorChange?: (nodeId: string, color: string) => void;
   onTitleChange?: (nodeId: string, title: string) => void;
   searchTerm?: string; // Ny prop för sökning
@@ -295,8 +296,12 @@ export default function NoteNode({
         minWidth={300}
         minHeight={150}
         onResize={(_e, params) => {
-          // Skicka upp nya storleken till Canvas för att sparas
+          // Uppdatera bara visuellt medan vi drar (snabbt)
           data.onResize?.(id, params.width, params.height);
+        }}
+        onResizeEnd={(_e, params) => {
+          // Spara till DB när vi släpper (förhindrar lagg)
+          data.onResizeEnd?.(id, params.width, params.height);
         }}
         handleStyle={{
           width: 8,

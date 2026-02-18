@@ -11,6 +11,7 @@ export type ImageNodeData = {
   label?: string;
   onDelete?: (id: string) => void;
   onResize?: (id: string, width: number, height: number) => void;
+  onResizeEnd?: (id: string, width: number, height: number) => void;
 };
 
 export type ImageNodeType = Node<ImageNodeData, "image">;
@@ -82,6 +83,9 @@ export default function ImageNode({
         keepAspectRatio={true}
         onResize={(_e, params) => {
           data.onResize?.(id, params.width, params.height);
+        }}
+        onResizeEnd={(_e, params) => {
+          data.onResizeEnd?.(id, params.width, params.height);
         }}
       />
       <SmartHandle

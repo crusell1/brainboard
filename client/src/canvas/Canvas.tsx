@@ -563,15 +563,28 @@ export default function Canvas() {
             ...node,
             style: { ...node.style, width, height },
           };
-          // Vi sparar här inne för att vara 100% säkra på att vi har rätt version av noden
-          console.log("Resize: Sparar till DB...", width, height);
-          saveNodeToDb(updatedNode);
           return nds.map((n) => (n.id === nodeId ? updatedNode : n));
         }
         return nds;
       });
     },
-    [saveNodeToDb, setNodes],
+    [setNodes],
+  );
+
+  // 🔥 NY: Spara bara till DB när storleksändringen är KLAR (för prestanda)
+  const onResizeEnd = useCallback(
+    (nodeId: string, width: number, height: number) => {
+      const node = nodes.find((n) => n.id === nodeId);
+      if (node) {
+        const updatedNode = {
+          ...node,
+          style: { ...node.style, width, height },
+        };
+        console.log("Resize End: Sparar till DB...", width, height);
+        saveNodeToDb(updatedNode);
+      }
+    },
+    [nodes, saveNodeToDb],
   );
 
   const onColorChange = useCallback(
@@ -651,6 +664,7 @@ export default function Canvas() {
         onStopEditing: stopEditing,
         onDelete: deleteNodeManual,
         onResize: onResize,
+        onResizeEnd: onResizeEnd, // Skicka med den nya funktionen
         onColorChange: onColorChange,
         onMagic: onMagic,
         onTagsChange: updateNodeTags,
@@ -663,6 +677,7 @@ export default function Canvas() {
       stopEditing,
       deleteNodeManual,
       onResize,
+      onResizeEnd,
       onColorChange,
       onMagic,
       updateNodeTags,
@@ -1160,6 +1175,7 @@ export default function Canvas() {
         height: "100vh",
         background: "#111111",
         position: "relative", // 🔥 FIX: Nödvändigt för att RadialMenu (absolute) ska positioneras korrekt relativt denna container
+        touchAction: "none", // 🔥 FIX: Förhindrar att webbläsaren zoomar hela sidan på mobil (fixar hackig zoom)
       }}
     >
       <ReactFlow
