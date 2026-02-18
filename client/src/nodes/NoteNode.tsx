@@ -3,9 +3,11 @@ import {
   Handle,
   Position,
   NodeResizer,
+  useHandleConnections,
   type Node,
   type NodeProps,
 } from "@xyflow/react";
+import RichTextEditor from "../components/RichTextEditor";
 
 export type NoteData = {
   title?: string;
@@ -18,12 +20,49 @@ export type NoteData = {
   onResize?: (nodeId: string, width: number, height: number) => void;
   onColorChange?: (nodeId: string, color: string) => void;
   onTitleChange?: (nodeId: string, title: string) => void;
+  searchTerm?: string; // Ny prop för sökning
+  isMatch?: boolean;
+  isConnected?: boolean;
   color?: string;
 };
 
 export type NoteNodeType = Node<NoteData, "note">;
 
 const COLORS = ["#f1f1f1", "#ffef9e", "#ffc4c4", "#b8e6ff", "#b5ffc6"];
+
+// Helper component that only shows the handle if selected or connected
+const SmartHandle = ({
+  id,
+  type,
+  position,
+  style,
+  selected,
+}: {
+  id: string;
+  type: "source" | "target";
+  position: Position;
+  style?: React.CSSProperties;
+  selected?: boolean;
+}) => {
+  const sourceConnections = useHandleConnections({ type: "source", id });
+  const targetConnections = useHandleConnections({ type: "target", id });
+  const isConnected =
+    sourceConnections.length > 0 || targetConnections.length > 0;
+  const isVisible = selected || isConnected;
+
+  return (
+    <Handle
+      id={id}
+      type={type}
+      position={position}
+      style={{
+        ...style,
+        opacity: isVisible ? 1 : 0,
+        pointerEvents: isVisible ? "all" : "none",
+      }}
+    />
+  );
+};
 
 export default function NoteNode({
   id,
@@ -32,9 +71,7 @@ export default function NoteNode({
 }: NodeProps<NoteNodeType>) {
   const [value, setValue] = useState(data.label ?? "");
   const [title, setTitle] = useState(data.title ?? "");
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const shadowRef = useRef<HTMLDivElement>(null);
 
   // Spara onResize i en ref för att kunna använda den i useEffect utan att skapa loopar
   const onResizeRef = useRef(data.onResize);
@@ -50,22 +87,15 @@ export default function NoteNode({
     setTitle(data.title ?? "");
   }, [data.title]);
 
-  useEffect(() => {
-    if (data.isEditing && textareaRef.current) {
-      textareaRef.current.focus();
-      // Vi tar bort autoResize här för att respektera den manuella storleken
-      const len = textareaRef.current.value.length;
-      textareaRef.current.setSelectionRange(len, len);
-    }
-  }, [data.isEditing]);
-
   // 🔥 Auto-resize logic: Mät texten och expandera noden om det behövs
   useEffect(() => {
-    if (!shadowRef.current || !containerRef.current) return;
+    if (!containerRef.current) return;
 
     const checkSize = () => {
-      const contentHeight = shadowRef.current!.scrollHeight;
-      const totalHeight = contentHeight + 80; // padding + title + buffer
+      // Vi mäter containerns scrollHeight direkt eftersom Tiptap expanderar den
+      const contentHeight = containerRef.current!.scrollHeight;
+      // Ingen extra buffer behövs om vi mäter containern direkt, men vi sätter en min-höjd
+      const totalHeight = contentHeight;
 
       const currentHeight = containerRef.current!.offsetHeight;
       const currentWidth = containerRef.current!.offsetWidth;
@@ -83,14 +113,14 @@ export default function NoteNode({
     const observer = new ResizeObserver(checkSize);
     observer.observe(containerRef.current);
 
-    // Kör även när texten ändras
-    checkSize();
+    // Kör en extra check efter en kort stund för att låta Tiptap rendera klart
+    setTimeout(checkSize, 100);
 
     return () => observer.disconnect();
-  }, [value, id]); // 🔥 VIKTIGT: Tog bort 'data' från beroenden för att stoppa kraschen
+  }, [value, id, data.isEditing]); // Uppdatera när value eller edit-läge ändras
 
   const stopEdit = () => {
-    data.onChange(id, value);
+    // Spara sker via onChange i RichTextEditor, här signalerar vi bara stop
     data.onStopEditing(id);
   };
 
@@ -101,6 +131,24 @@ export default function NoteNode({
     background: "#111",
     border: "2px solid #fff",
   };
+
+  // Beräkna box-shadow baserat på sökstatus
+  const isSearchActive = !!data.searchTerm;
+  let boxShadow = "0 8px 20px rgba(0,0,0,0.15)"; // Default skugga
+
+  if (isSearchActive) {
+    if (data.isMatch) {
+      // Stark glow för match
+      boxShadow =
+        "0 0 0 3px rgba(255, 255, 0, 0.8), 0 0 20px rgba(255, 255, 0, 0.6)";
+    } else if (data.isConnected) {
+      // Mild glow för kopplade
+      boxShadow =
+        "0 0 0 2px rgba(180, 120, 255, 0.6), 0 0 12px rgba(180, 120, 255, 0.4)";
+    } else {
+      boxShadow = "none"; // Ingen skugga för övriga vid sökning
+    }
+  }
 
   return (
     <div
@@ -118,11 +166,12 @@ export default function NoteNode({
         borderRadius: 16,
         background: data.color ?? "#f1f1f1",
         border: selected ? "2px solid #6366f1" : "1px solid #ddd",
-        boxShadow: "0 8px 20px rgba(0,0,0,0.15)",
+        boxShadow: boxShadow,
         boxSizing: "border-box",
         position: "relative",
         display: "flex",
         flexDirection: "column",
+        overflow: "visible", // Viktigt för att glow ska synas utanför
       }}
     >
       <NodeResizer
@@ -146,6 +195,7 @@ export default function NoteNode({
 
       {/* Titel-input */}
       <input
+        className="nodrag"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         onBlur={() => data.onTitleChange?.(id, title)}
@@ -162,30 +212,6 @@ export default function NoteNode({
           textAlign: "center",
         }}
       />
-
-      {/* Shadow Div för mätning (osynlig) */}
-      <div
-        ref={shadowRef}
-        style={{
-          position: "absolute",
-          left: 16,
-          top: 16,
-          width: "calc(100% - 32px)",
-          visibility: "hidden",
-          pointerEvents: "none",
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-word",
-          padding: 12,
-          fontSize: 14,
-          fontFamily: "inherit",
-          lineHeight: "normal",
-          boxSizing: "border-box",
-          zIndex: -1,
-        }}
-      >
-        {value}
-        {value.endsWith("\n") && <br />}
-      </div>
 
       {/* Färgpalett (visas när vald) */}
       {selected && (
@@ -250,79 +276,57 @@ export default function NoteNode({
         </div>
       )}
 
-      <Handle
+      <SmartHandle
         id="top"
         type="source"
         position={Position.Top}
         style={handleStyle}
+        selected={selected}
       />
-      <Handle
+      <SmartHandle
         id="right"
         type="source"
         position={Position.Right}
         style={handleStyle}
+        selected={selected}
       />
-      <Handle
+      <SmartHandle
         id="bottom"
         type="source"
         position={Position.Bottom}
         style={handleStyle}
+        selected={selected}
       />
-      <Handle
+      <SmartHandle
         id="left"
         type="source"
         position={Position.Left}
         style={handleStyle}
+        selected={selected}
       />
 
-      {data.isEditing ? (
-        <textarea
-          ref={textareaRef}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
+      <div
+        style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          background: "#3a3a3a",
+          borderRadius: 12,
+          padding: 12,
+          color: "white",
+          overflow: "hidden",
+        }}
+      >
+        <RichTextEditor
+          content={value}
+          isEditing={!!data.isEditing}
+          onChange={(html) => {
+            setValue(html);
+            data.onChange(id, html);
+          }}
           onBlur={stopEdit}
-          style={{
-            width: "100%",
-            flex: 1,
-            borderRadius: 12,
-            border: "none",
-            outline: "none",
-            resize: "none",
-            padding: 12,
-            background: "#3a3a3a",
-            color: "white",
-            fontSize: 14,
-            boxSizing: "border-box",
-            wordBreak: "break-word",
-            overflowWrap: "break-word",
-            whiteSpace: "pre-wrap",
-            overflow: "hidden", // Eller "auto" om du vill ha scrollbar
-            fontFamily: "inherit",
-            lineHeight: "normal",
-          }}
         />
-      ) : (
-        <div
-          style={{
-            width: "100%",
-            flex: 1,
-            borderRadius: 12,
-            padding: 12,
-            background: "#3a3a3a",
-            color: "white",
-            fontSize: 14,
-            boxSizing: "border-box",
-            wordBreak: "break-word",
-            overflowWrap: "break-word",
-            whiteSpace: "pre-wrap",
-            overflow: "hidden",
-            fontFamily: "inherit",
-            lineHeight: "normal",
-          }}
-        >
-          {value}
-        </div>
-      )}
+      </div>
     </div>
   );
 }
