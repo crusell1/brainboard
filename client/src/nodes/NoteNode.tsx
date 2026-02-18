@@ -3,16 +3,22 @@ import {
   Handle,
   Position,
   NodeResizer,
-  useHandleConnections,
+  useNodeConnections,
   type Node,
   type NodeProps,
 } from "@xyflow/react";
 import RichTextEditor from "../components/RichTextEditor";
+import { Sparkles, Loader2, Tag, Plus, X } from "lucide-react";
 
 export type NoteData = {
   title?: string;
   label: string;
   isEditing?: boolean;
+  startListening?: boolean;
+  tags?: string[];
+  isProcessing?: boolean;
+  onMagic?: (nodeId: string) => void;
+  onTagsChange?: (nodeId: string, tags: string[]) => void;
   onChange: (nodeId: string, value: string) => void;
   onStopEditing: (nodeId: string) => void;
   onStartEditing: (nodeId: string) => void;
@@ -30,6 +36,40 @@ export type NoteNodeType = Node<NoteData, "note">;
 
 const COLORS = ["#f1f1f1", "#ffef9e", "#ffc4c4", "#b8e6ff", "#b5ffc6"];
 
+const DEFAULT_TAGS = [
+  "skola",
+  "fritid",
+  "spel",
+  "träning",
+  "mat",
+  "arbete",
+  "idé",
+  "viktigt",
+];
+
+const TAG_COLORS = [
+  "#ef4444",
+  "#f97316",
+  "#f59e0b",
+  "#84cc16",
+  "#10b981",
+  "#06b6d4",
+  "#3b82f6",
+  "#6366f1",
+  "#8b5cf6",
+  "#d946ef",
+  "#f43f5e",
+];
+
+const getTagColor = (tag: string) => {
+  let hash = 0;
+  for (let i = 0; i < tag.length; i++) {
+    hash = tag.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const index = Math.abs(hash) % TAG_COLORS.length;
+  return TAG_COLORS[index];
+};
+
 // Helper component that only shows the handle if selected or connected
 const SmartHandle = ({
   id,
@@ -44,8 +84,14 @@ const SmartHandle = ({
   style?: React.CSSProperties;
   selected?: boolean;
 }) => {
-  const sourceConnections = useHandleConnections({ type: "source", id });
-  const targetConnections = useHandleConnections({ type: "target", id });
+  const sourceConnections = useNodeConnections({
+    handleType: "source",
+    handleId: id,
+  });
+  const targetConnections = useNodeConnections({
+    handleType: "target",
+    handleId: id,
+  });
   const isConnected =
     sourceConnections.length > 0 || targetConnections.length > 0;
   const isVisible = selected || isConnected;
@@ -72,6 +118,28 @@ export default function NoteNode({
   const [value, setValue] = useState(data.label ?? "");
   const [title, setTitle] = useState(data.title ?? "");
   const containerRef = useRef<HTMLDivElement>(null);
+  const [showTagMenu, setShowTagMenu] = useState(false);
+  const [customTag, setCustomTag] = useState("");
+
+  const toggleTag = (tag: string) => {
+    const currentTags = data.tags || [];
+    let newTags;
+    if (currentTags.includes(tag)) {
+      newTags = currentTags.filter((t) => t !== tag);
+    } else {
+      newTags = [...currentTags, tag];
+    }
+    data.onTagsChange?.(id, newTags);
+  };
+
+  const addCustomTag = () => {
+    if (!customTag.trim()) return;
+    const currentTags = data.tags || [];
+    if (!currentTags.includes(customTag.trim())) {
+      data.onTagsChange?.(id, [...currentTags, customTag.trim()]);
+    }
+    setCustomTag("");
+  };
 
   // Spara onResize i en ref för att kunna använda den i useEffect utan att skapa loopar
   const onResizeRef = useRef(data.onResize);
@@ -100,7 +168,7 @@ export default function NoteNode({
       const currentHeight = containerRef.current!.offsetHeight;
       const currentWidth = containerRef.current!.offsetWidth;
 
-      const minHeight = 90;
+      const minHeight = 150;
       const targetHeight = Math.max(minHeight, totalHeight);
 
       // Uppdatera bara om höjden skiljer sig markant
@@ -158,11 +226,11 @@ export default function NoteNode({
         data.onStartEditing(id);
       }}
       style={{
-        minWidth: 150,
-        minHeight: 90,
+        minWidth: 300,
+        minHeight: 150,
         width: "100%",
         height: "100%",
-        padding: "12px 12px 32px 12px",
+        padding: "16px",
         borderRadius: 16,
         background: data.color ?? "#f1f1f1",
         border: selected ? "2px solid #6366f1" : "1px solid #ddd",
@@ -174,10 +242,58 @@ export default function NoteNode({
         overflow: "visible", // Viktigt för att glow ska synas utanför
       }}
     >
+      {/* Tags Display (Top Left Label) */}
+      {data.tags && data.tags.length > 0 && (
+        <div
+          className="nodrag"
+          style={{
+            position: "absolute",
+            top: -10,
+            left: 16,
+            display: "flex",
+            gap: 4,
+            zIndex: 5,
+            flexWrap: "wrap",
+            maxWidth: "100%",
+            pointerEvents: "none",
+          }}
+        >
+          {data.tags.map((tag, i) => (
+            <div
+              key={i}
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleTag(tag);
+              }}
+              style={{
+                fontSize: "10px",
+                fontWeight: 600,
+                background: getTagColor(tag),
+                color: "white",
+                padding: "2px 6px 2px 8px",
+                borderRadius: "12px",
+                display: "flex",
+                alignItems: "center",
+                gap: 3,
+                boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
+                border: "1px solid rgba(255,255,255,0.2)",
+                cursor: "pointer",
+                pointerEvents: "auto",
+              }}
+              title="Klicka för att ta bort"
+            >
+              <Tag size={8} strokeWidth={3} />
+              {tag}
+              <X size={8} strokeWidth={3} style={{ opacity: 0.7 }} />
+            </div>
+          ))}
+        </div>
+      )}
+
       <NodeResizer
         isVisible={selected} // Visa bara handles när noden är vald (snyggare)
-        minWidth={150}
-        minHeight={60}
+        minWidth={300}
+        minHeight={150}
         onResize={(_e, params) => {
           // Skicka upp nya storleken till Canvas för att sparas
           data.onResize?.(id, params.width, params.height);
@@ -244,6 +360,144 @@ export default function NoteNode({
               }}
             />
           ))}
+        </div>
+      )}
+
+      {/* Tag Button */}
+      {selected && (
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowTagMenu(!showTagMenu);
+          }}
+          style={{
+            position: "absolute",
+            top: 2,
+            right: 46, // Till vänster om Magic-knappen
+            width: 16,
+            height: 16,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            zIndex: 10,
+          }}
+          title="Taggar"
+        >
+          <Tag size={14} color="#6366f1" />
+        </div>
+      )}
+
+      {/* Tag Menu Popover */}
+      {selected && showTagMenu && (
+        <div
+          className="nodrag"
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: "absolute",
+            top: 24,
+            right: 0,
+            width: 200,
+            background: "#222",
+            border: "1px solid #444",
+            borderRadius: 8,
+            padding: 8,
+            zIndex: 20,
+            boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          }}
+        >
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+            {DEFAULT_TAGS.map((tag) => {
+              const isActive = data.tags?.includes(tag);
+              return (
+                <div
+                  key={tag}
+                  onClick={() => toggleTag(tag)}
+                  style={{
+                    fontSize: "11px",
+                    padding: "4px 8px",
+                    borderRadius: 12,
+                    cursor: "pointer",
+                    background: isActive ? getTagColor(tag) : "#333",
+                    color: isActive ? "white" : "#ccc",
+                    border: isActive
+                      ? `1px solid ${getTagColor(tag)}`
+                      : "1px solid #555",
+                    transition: "all 0.1s",
+                  }}
+                >
+                  {tag}
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ display: "flex", gap: 4 }}>
+            <input
+              value={customTag}
+              onChange={(e) => setCustomTag(e.target.value)}
+              placeholder="Ny tagg..."
+              style={{
+                flex: 1,
+                background: "#111",
+                border: "1px solid #444",
+                color: "white",
+                fontSize: "12px",
+                padding: "4px 8px",
+                borderRadius: 4,
+                outline: "none",
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") addCustomTag();
+              }}
+            />
+            <button
+              onClick={addCustomTag}
+              style={{
+                background: "#444",
+                border: "none",
+                color: "white",
+                borderRadius: 4,
+                cursor: "pointer",
+                padding: "0 8px",
+                display: "flex",
+                alignItems: "center",
+              }}
+            >
+              <Plus size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Magic Button (AI) */}
+      {selected && (
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            data.onMagic?.(id);
+          }}
+          style={{
+            position: "absolute",
+            top: 2,
+            right: 24, // Till vänster om krysset
+            width: 16,
+            height: 16,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            zIndex: 10,
+          }}
+          title="AI✨"
+        >
+          {data.isProcessing ? (
+            <Loader2 size={14} className="animate-spin" color="#6366f1" />
+          ) : (
+            <Sparkles size={14} color="#6366f1" fill="none" />
+          )}
         </div>
       )}
 
@@ -320,6 +574,7 @@ export default function NoteNode({
         <RichTextEditor
           content={value}
           isEditing={!!data.isEditing}
+          startListeningOnMount={!!data.startListening}
           onChange={(html) => {
             setValue(html);
             data.onChange(id, html);

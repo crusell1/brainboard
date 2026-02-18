@@ -8,17 +8,31 @@ import {
   ListOrdered,
   Heading1,
   Heading2,
+  Mic,
+  MicOff,
 } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import useSpeechRecognition from "../hooks/useSpeechRecognition";
 
 type RichTextEditorProps = {
   content: string;
   isEditing: boolean;
+  startListeningOnMount?: boolean;
   onChange: (html: string) => void;
   onBlur: () => void;
 };
 
-const MenuBar = ({ editor }: { editor: any }) => {
+const MenuBar = ({
+  editor,
+  isListening,
+  onToggleVoice,
+  hasVoiceSupport,
+}: {
+  editor: any;
+  isListening: boolean;
+  onToggleVoice: () => void;
+  hasVoiceSupport: boolean;
+}) => {
   if (!editor) {
     return null;
   }
@@ -93,6 +107,27 @@ const MenuBar = ({ editor }: { editor: any }) => {
       >
         <ListOrdered size={14} />
       </button>
+
+      {hasVoiceSupport && (
+        <>
+          <div style={{ width: 1, background: "#444", margin: "0 4px" }} />
+          <button
+            onClick={(e) => {
+              // Stoppa eventuella bubblande events som kan störa
+              e.stopPropagation();
+              console.log("Mic clicked. Listening:", isListening);
+              onToggleVoice();
+            }}
+            style={{
+              ...buttonStyle(isListening),
+              color: isListening ? "#ff4444" : "#ccc",
+            }}
+            title={isListening ? "Sluta lyssna" : "Diktera"}
+          >
+            {isListening ? <Mic size={14} /> : <MicOff size={14} />}
+          </button>
+        </>
+      )}
     </div>
   );
 };
@@ -100,9 +135,19 @@ const MenuBar = ({ editor }: { editor: any }) => {
 export default function RichTextEditor({
   content,
   isEditing,
+  startListeningOnMount,
   onChange,
   onBlur,
 }: RichTextEditorProps) {
+  const {
+    isListening,
+    transcript,
+    startListening,
+    stopListening,
+    resetTranscript,
+    hasSupport,
+  } = useSpeechRecognition();
+
   const editor = useEditor({
     extensions: [
       StarterKit,
@@ -120,13 +165,41 @@ export default function RichTextEditor({
     },
     editorProps: {
       attributes: {
-        // VIKTIGT: 'nodrag' gör att vi kan markera text utan att React Flow flyttar noden
-        class:
-          "nodrag prose prose-sm sm:prose lg:prose-lg xl:prose-xl focus:outline-none text-white",
+        // VIKTIGT: 'nodrag' läggs till villkorligt. Utan den kan vi dra noden via texten.
+        class: `prose prose-sm sm:prose lg:prose-lg xl:prose-xl focus:outline-none text-white ${
+          isEditing ? "nodrag" : ""
+        }`,
         style: "min-height: 60px; outline: none;",
       },
     },
   });
+
+  // Auto-starta lyssning om flaggan är satt (t.ex. från Radial Menu)
+  const hasAutoStartedRef = useRef(false);
+  useEffect(() => {
+    if (startListeningOnMount && !hasAutoStartedRef.current) {
+      startListening();
+      hasAutoStartedRef.current = true;
+    }
+  }, [startListeningOnMount, startListening]);
+
+  // Stäng av mikrofonen automatiskt när edit-läget avslutas (t.ex. vid onBlur)
+  useEffect(() => {
+    if (!isEditing && isListening) {
+      stopListening();
+    }
+  }, [isEditing, isListening, stopListening]);
+
+  // Lyssna på inkommande text från Web Speech API
+  useEffect(() => {
+    if (transcript && editor) {
+      console.log("📝 Infogar text i editor:", transcript);
+      // Infoga texten vid markören och lägg till ett mellanslag
+      editor.chain().focus().insertContent(`${transcript} `).run();
+      // Rensa transcript i hooken så vi inte infogar samma text igen
+      resetTranscript();
+    }
+  }, [transcript, editor, resetTranscript]);
 
   // Synka content om det ändras utifrån (t.ex. vid undo/redo)
   useEffect(() => {
@@ -143,6 +216,19 @@ export default function RichTextEditor({
   useEffect(() => {
     if (editor) {
       editor.setEditable(isEditing);
+
+      // Uppdatera klasser dynamiskt: Lägg till 'nodrag' endast i edit-mode
+      editor.setOptions({
+        editorProps: {
+          attributes: {
+            class: `prose prose-sm sm:prose lg:prose-lg xl:prose-xl focus:outline-none text-white ${
+              isEditing ? "nodrag" : ""
+            }`,
+            style: "min-height: 60px; outline: none;",
+          },
+        },
+      });
+
       if (isEditing) {
         editor.commands.focus();
       }
@@ -158,7 +244,14 @@ export default function RichTextEditor({
         height: "100%",
       }}
     >
-      {isEditing && <MenuBar editor={editor} />}
+      {isEditing && (
+        <MenuBar
+          editor={editor}
+          isListening={isListening}
+          onToggleVoice={isListening ? stopListening : startListening}
+          hasVoiceSupport={hasSupport}
+        />
+      )}
       <EditorContent
         editor={editor}
         style={{
@@ -178,7 +271,7 @@ export default function RichTextEditor({
         .tiptap h1 { font-size: 1.4em; font-weight: bold; margin-bottom: 8px; }
         .tiptap h2 { font-size: 1.2em; font-weight: bold; margin-bottom: 6px; }
         .tiptap-container .is-editor-empty:first-child::before {
-          color: #666;
+          color: #ccc;
           content: attr(data-placeholder);
           float: left;
           height: 0;

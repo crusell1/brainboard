@@ -23,8 +23,8 @@ import DrawingLayer from "../components/DrawingLayer";
 import type { Drawing, Point } from "../types/drawing";
 import DrawModeControls from "../components/DrawModeControls";
 
-const NODE_WIDTH = 200;
-const NODE_HEIGHT = 100;
+const NODE_WIDTH = 300;
+const NODE_HEIGHT = 200;
 
 type Snapshot = { nodes: Node[]; edges: Edge[] };
 
@@ -112,8 +112,8 @@ export default function Canvas() {
           type: n.type || "note", // Använd typ från DB, fallback till note
           position: { x: n.position_x, y: n.position_y },
           style: {
-            width: n.width ?? 200,
-            height: n.height ?? (n.type === "image" ? undefined : 100),
+            width: n.width ?? NODE_WIDTH,
+            height: n.height ?? (n.type === "image" ? undefined : NODE_HEIGHT),
           },
           data: {
             // Om det är en bild ligger URL:en i content, annars är content texten
@@ -122,6 +122,7 @@ export default function Canvas() {
             label: n.type === "image" ? "Bild" : n.content,
             color: n.color ?? "#f1f1f1",
             isEditing: false,
+            tags: (n as any).tags || [],
           },
         }));
         setNodes(loadedNodes);
@@ -271,9 +272,11 @@ export default function Canvas() {
       position_y: node.position.y,
       content: contentToSave,
       title: node.data.title ?? "",
-      width: node.style?.width ?? 200,
-      height: node.style?.height ?? (node.type === "image" ? undefined : 100),
+      width: node.style?.width ?? NODE_WIDTH,
+      height:
+        node.style?.height ?? (node.type === "image" ? undefined : NODE_HEIGHT),
       color: node.data.color ?? "#f1f1f1",
+      tags: node.data.tags || [],
     });
 
     if (error) console.error("Error creating node:", error);
@@ -296,6 +299,7 @@ export default function Canvas() {
           width: node.style?.width,
           height: node.style?.height,
           color: node.data.color,
+          tags: node.data.tags || [],
           // Vi skickar med updated_at för att vara säkra på att Supabase ser ändringen
           updated_at: new Date().toISOString(),
         })
@@ -586,6 +590,56 @@ export default function Canvas() {
     [saveNodeToDb, setNodes],
   );
 
+  const updateNodeTags = useCallback(
+    (nodeId: string, tags: string[]) => {
+      setNodes((nds) =>
+        nds.map((node) => {
+          if (node.id === nodeId) {
+            const newNode = { ...node, data: { ...node.data, tags } };
+            saveNodeToDb(newNode);
+            return newNode;
+          }
+          return node;
+        }),
+      );
+    },
+    [saveNodeToDb, setNodes],
+  );
+
+  const onMagic = useCallback(
+    (nodeId: string) => {
+      // 1. Sätt noden i "processing" state
+      setNodes((nds) =>
+        nds.map((node) => {
+          if (node.id === nodeId) {
+            return { ...node, data: { ...node.data, isProcessing: true } };
+          }
+          return node;
+        }),
+      );
+
+      // 2. Simulera AI-anrop (Mock)
+      setTimeout(() => {
+        setNodes((nds) =>
+          nds.map((node) => {
+            if (node.id === nodeId) {
+              return {
+                ...node,
+                data: {
+                  ...node.data,
+                  isProcessing: false,
+                  tags: ["AI", "Summary", "Concept"], // Mock data
+                },
+              };
+            }
+            return node;
+          }),
+        );
+      }, 1500);
+    },
+    [setNodes],
+  );
+
   const createNodeWithHandlers = useCallback(
     (node: Node): Node => ({
       ...node,
@@ -598,6 +652,8 @@ export default function Canvas() {
         onDelete: deleteNodeManual,
         onResize: onResize,
         onColorChange: onColorChange,
+        onMagic: onMagic,
+        onTagsChange: updateNodeTags,
       },
     }),
     [
@@ -608,6 +664,8 @@ export default function Canvas() {
       deleteNodeManual,
       onResize,
       onColorChange,
+      onMagic,
+      updateNodeTags,
     ],
   );
 
@@ -643,9 +701,17 @@ export default function Canvas() {
     nodes.forEach((node) => {
       const label = typeof node.data.label === "string" ? node.data.label : "";
       const title = typeof node.data.title === "string" ? node.data.title : "";
+
+      // 🔥 FIX: Sök även i taggar
+      const tags = Array.isArray(node.data.tags) ? node.data.tags : [];
+      const hasTagMatch = tags.some((tag) =>
+        tag.toLowerCase().includes(lowerTerm),
+      );
+
       if (
         label.toLowerCase().includes(lowerTerm) ||
-        title.toLowerCase().includes(lowerTerm)
+        title.toLowerCase().includes(lowerTerm) ||
+        hasTagMatch
       ) {
         matches.add(node.id);
       }
@@ -1044,6 +1110,42 @@ export default function Canvas() {
 
       createNodeInDb(newNode);
 
+      const updatedNodes = [...nodes, newNode];
+      setNodes(updatedNodes);
+      saveSnapshot(updatedNodes, edges);
+    }
+
+    if (optionId === "voice") {
+      if (!reactFlowInstance) return;
+
+      // 1. Konvertera skärmkoordinater till React Flow-koordinater
+      const flowPosition = reactFlowInstance.screenToFlowPosition({
+        x: menuState.x,
+        y: menuState.y,
+      });
+
+      // 2. Centrera noden
+      const centeredPosition = {
+        x: flowPosition.x - NODE_WIDTH / 2,
+        y: flowPosition.y - NODE_HEIGHT / 2,
+      };
+
+      // 3. Skapa noden med startListening: true
+      const newNode: Node = {
+        id: crypto.randomUUID(),
+        type: "note",
+        position: centeredPosition,
+        data: {
+          title: "",
+          label: "",
+          color: "#f1f1f1",
+          isEditing: true,
+          startListening: true, // 🔥 Detta triggar mikrofonen direkt
+        },
+        style: { width: NODE_WIDTH, height: NODE_HEIGHT },
+      };
+
+      createNodeInDb(newNode);
       const updatedNodes = [...nodes, newNode];
       setNodes(updatedNodes);
       saveSnapshot(updatedNodes, edges);

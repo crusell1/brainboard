@@ -1,7 +1,7 @@
 import {
   Handle,
   Position,
-  useHandleConnections,
+  useNodeConnections,
   NodeResizer,
 } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
@@ -29,8 +29,14 @@ const SmartHandle = ({
   style?: React.CSSProperties;
   selected?: boolean;
 }) => {
-  const sourceConnections = useHandleConnections({ type: "source", id });
-  const targetConnections = useHandleConnections({ type: "target", id });
+  const sourceConnections = useNodeConnections({
+    handleType: "source",
+    handleId: id,
+  });
+  const targetConnections = useNodeConnections({
+    handleType: "target",
+    handleId: id,
+  });
   const isConnected =
     sourceConnections.length > 0 || targetConnections.length > 0;
   const isVisible = selected || isConnected;
