@@ -169,7 +169,7 @@ export default function RichTextEditor({
         // VIKTIGT: 'nodrag' läggs till villkorligt. Utan den kan vi dra noden via texten.
         class: `prose prose-sm sm:prose lg:prose-lg xl:prose-xl focus:outline-none text-white ${
           isEditing ? "nodrag" : ""
-        }`,
+        } tiptap`, // 🔥 FIX: Lägg till 'tiptap' klassen så NoteNode kan hitta och mäta den
         style: "min-height: 60px; outline: none;",
       },
     },
@@ -227,7 +227,7 @@ export default function RichTextEditor({
           attributes: {
             class: `prose prose-sm sm:prose lg:prose-lg xl:prose-xl focus:outline-none text-white ${
               isEditing ? "nodrag" : ""
-            }`,
+            } tiptap`, // 🔥 FIX: Lägg till 'tiptap' här också
             style: "min-height: 60px; outline: none;",
           },
         },
@@ -245,7 +245,8 @@ export default function RichTextEditor({
         display: "flex",
         flexDirection: "column",
         width: "100%",
-        height: "100%",
+        height: "auto",
+        minHeight: "auto", // 🔥 FIX: Låt innehållet styra, tvinga inte 100%
       }}
     >
       {isEditing && (
@@ -259,7 +260,7 @@ export default function RichTextEditor({
       <EditorContent
         editor={editor}
         style={{
-          flex: 1,
+          width: "100%",
           cursor: isEditing ? "text" : "default",
           // Enkel styling för HTML-innehållet
           fontSize: "14px",

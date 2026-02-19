@@ -16,12 +16,14 @@ import {
 } from "@xyflow/react";
 import { supabase } from "../lib/supabase";
 import type { Note, DbEdge, DbDrawing } from "../types/database";
-import NoteNode from "../nodes/NoteNode";
+import NoteNode, { type NoteData } from "../nodes/NoteNode";
 import ImageNode from "../nodes/ImageNode";
 import RadialMenu from "../components/RadialMenu";
 import DrawingLayer from "../components/DrawingLayer";
 import type { Drawing, Point } from "../types/drawing";
 import DrawModeControls from "../components/DrawModeControls";
+import ShareModal from "../components/ShareModal"; // 🔥 Importera ShareModal
+import { Share2 } from "lucide-react"; // 🔥 Importera Share-ikon
 
 const NODE_WIDTH = 300;
 const NODE_HEIGHT = 200;
@@ -44,8 +46,10 @@ export default function Canvas() {
     Edge
   > | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [boardId, setBoardId] = useState<string | null>(null); // 🔥 NY: Håll koll på aktiv board
   // 🔥 FIX: Använd useRef för timeout för att undvika race conditions vid dubbelklick
   const clickTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [showShareModal, setShowShareModal] = useState(false); // 🔥 State för ShareModal
 
   // State för Radial Menu
   const [menuState, setMenuState] = useState<{
@@ -93,13 +97,107 @@ export default function Canvas() {
       const {
         data: { session },
       } = await supabase.auth.getSession();
-      if (!session?.user) return;
+      if (!session?.user) {
+        return;
+      }
 
-      // Hämta noder
+      // 🔥 JOIN LOGIC: Kolla om vi har en invite-token i URL:en
+      const params = new URLSearchParams(window.location.search);
+      const inviteToken = params.get("token");
+
+      if (inviteToken) {
+        console.log("🔍 Hittade invite-token, försöker gå med i board...");
+
+        // 1. Hämta inbjudan
+        const { data: invite, error: inviteError } = await supabase
+          .from("board_invites")
+          .select("*")
+          .eq("token", inviteToken)
+          .single();
+
+        if (inviteError || !invite) {
+          alert("Ogiltig eller utgången länk.");
+        } else {
+          // 2. Kolla om den gått ut
+          const now = new Date();
+          const expiresAt = invite.expires_at
+            ? new Date(invite.expires_at)
+            : null;
+
+          if (expiresAt && now > expiresAt) {
+            alert("Den här länken har gått ut.");
+          } else {
+            // 3. Lägg till användaren i board_members
+            const { error: joinError } = await supabase
+              .from("board_members")
+              .insert({
+                board_id: invite.board_id,
+                user_id: session.user.id,
+                role: invite.role || "viewer",
+              });
+
+            if (joinError && joinError.code !== "23505") {
+              // 23505 = unique violation (redan medlem)
+              console.error("Kunde inte gå med i board:", joinError);
+              alert("Ett fel uppstod när du försökte gå med.");
+            } else {
+              console.log("✅ Gick med i board (eller var redan medlem)!");
+              // Sätt aktiv board till den vi just gick med i
+              setBoardId(invite.board_id);
+              // Rensa URL:en snyggt
+              window.history.replaceState(
+                {},
+                document.title,
+                window.location.pathname,
+              );
+              return; // Avbryt resten av initieringen för att ladda den nya boarden via useEffect-dependecy
+            }
+          }
+        }
+      }
+
+      // 🔥 NY: Board-logik - Hämta eller skapa board
+      let activeBoardId = boardId;
+
+      if (!activeBoardId) {
+        // 1. Kolla om användaren har några boards
+        const { data: boards } = await supabase
+          .from("boards")
+          .select("id")
+          .eq("user_id", session.user.id)
+          .order("created_at", { ascending: true }) // 🔥 FIX: Ta alltid den äldsta boarden först (stabiliserar reload)
+          .limit(1);
+
+        if (boards && boards.length > 0) {
+          activeBoardId = boards[0].id;
+        } else {
+          // 2. Om inte, skapa en "General" board
+          const { data: newBoard, error: createError } = await supabase
+            .from("boards")
+            .insert({ user_id: session.user.id, title: "General" })
+            .select()
+            .single();
+
+          if (createError) {
+            console.error("Kunde inte skapa board (RLS-fel?):", createError);
+          }
+
+          if (newBoard) activeBoardId = newBoard.id;
+        }
+        if (activeBoardId) setBoardId(activeBoardId);
+      }
+
+      if (!activeBoardId) {
+        console.error("Kunde inte hitta eller skapa en board.");
+        return;
+      }
+
+      // Hämta noder (Filtrera på board_id)
       const { data, error } = await supabase
         .from("nodes")
         .select("*")
-        .eq("user_id", session.user.id);
+        .eq("user_id", session.user.id)
+        .eq("board_id", activeBoardId); // 🔥 Filtrera på board
 
       if (error) {
         console.error("Error fetching nodes:", error);
@@ -134,7 +232,8 @@ export default function Canvas() {
       const { data: edgeData, error: edgeError } = await supabase
         .from("edges")
         .select("*")
-        .eq("user_id", session.user.id);
+        .eq("user_id", session.user.id)
+        .eq("board_id", activeBoardId); // 🔥 Filtrera på board
 
       if (edgeError) console.error("Error fetching edges:", edgeError);
 
@@ -154,7 +253,8 @@ export default function Canvas() {
       const { data: drawingData, error: drawingError } = await supabase
         .from("drawings")
         .select("*")
-        .eq("user_id", session.user.id);
+        .eq("user_id", session.user.id)
+        .eq("board_id", activeBoardId); // 🔥 Filtrera på board
 
       if (drawingError) console.error("Error fetching drawings:", drawingError);
 
@@ -171,16 +271,21 @@ export default function Canvas() {
     };
 
     fetchNodes();
-  }, [setNodes]);
+  }, [setNodes, boardId]); // 🔥 Kör om när boardId sätts
 
   // 1.5 Realtime Subscription (Synk mellan flikar)
   useEffect(() => {
+    if (!boardId) return; // Vänta tills vi har en board
+
     const channel = supabase
       .channel("brainboard-sync")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "nodes" },
         (payload) => {
+          // 🔥 Ignorera events från andra boards
+          if (payload.new && (payload.new as any).board_id !== boardId) return;
+
           if (payload.eventType === "INSERT") {
             const newNote = payload.new as Note;
             setNodes((nds) => {
@@ -255,37 +360,45 @@ export default function Canvas() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [setNodes]);
+  }, [setNodes, boardId]); // 🔥 Uppdatera prenumeration om board ändras
 
   // 2. Skapa nod i DB
-  const createNodeInDb = useCallback(async (node: Node) => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (!session?.user) return;
+  const createNodeInDb = useCallback(
+    async (node: Node) => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.user || !boardId) {
+        console.error("Kan inte spara nod: Board ID saknas!");
+        return;
+      }
 
-    // Om det är en bild, spara URL (src) i content. Annars spara label (text).
-    const contentToSave =
-      node.type === "image" ? node.data.src : node.data.label;
+      // Om det är en bild, spara URL (src) i content. Annars spara label (text).
+      const contentToSave =
+        node.type === "image" ? node.data.src : node.data.label;
 
-    const { error } = await supabase.from("nodes").insert({
-      id: node.id,
-      user_id: session.user.id,
-      type: node.type, // Spara typen!
-      position_x: node.position.x,
-      position_y: node.position.y,
-      content: contentToSave,
-      title: node.data.title ?? "",
-      width: node.style?.width ?? NODE_WIDTH,
-      height:
-        node.style?.height ?? (node.type === "image" ? undefined : NODE_HEIGHT),
-      color: node.data.color ?? "#f1f1f1",
-      tags: node.data.tags || [],
-    });
+      const { error } = await supabase.from("nodes").insert({
+        id: node.id,
+        user_id: session.user.id,
+        board_id: boardId, // 🔥 Koppla till board
+        type: node.type, // Spara typen!
+        position_x: node.position.x,
+        position_y: node.position.y,
+        content: contentToSave,
+        title: node.data.title ?? "",
+        width: node.style?.width ?? NODE_WIDTH,
+        height:
+          node.style?.height ??
+          (node.type === "image" ? undefined : NODE_HEIGHT),
+        color: node.data.color ?? "#f1f1f1",
+        tags: node.data.tags || [],
+      });
 
-    if (error) console.error("Error creating node:", error);
-    else console.log("Skapade nod i DB:", node.id);
-  }, []);
+      if (error) console.error("Error creating node:", error);
+      else console.log("Skapade nod i DB:", node.id);
+    },
+    [boardId],
+  ); // 🔥 Lägg till boardId i deps
 
   // 3. Spara (Uppdatera) nod i DB
   const saveNodeToDb = useCallback(
@@ -304,6 +417,8 @@ export default function Canvas() {
           height: node.style?.height,
           color: node.data.color,
           tags: node.data.tags || [],
+          summary: (node.data as any).summary, // 🔥 FIX: Spara summary
+          ai_tags: (node.data as any).aiTags || [], // 🔥 FIX: Spara AI-taggar (mappa camelCase -> snake_case)
           // Vi skickar med updated_at för att vara säkra på att Supabase ser ändringen
           updated_at: new Date().toISOString(),
         })
@@ -359,22 +474,26 @@ export default function Canvas() {
   };
 
   // 5. Skapa Edge i DB
-  const createEdgeInDb = async (edge: Edge) => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (!session?.user) return;
+  const createEdgeInDb = useCallback(
+    async (edge: Edge) => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.user || !boardId) return;
 
-    const { error } = await supabase.from("edges").insert({
-      id: edge.id,
-      user_id: session.user.id,
-      source: edge.source,
-      target: edge.target,
-      source_handle: edge.sourceHandle, // React Flow använder 'sourceHandle'
-      target_handle: edge.targetHandle, // React Flow använder 'targetHandle'
-    });
-    if (error) console.error("Error creating edge:", error);
-  };
+      const { error } = await supabase.from("edges").insert({
+        id: edge.id,
+        user_id: session.user.id,
+        source: edge.source,
+        target: edge.target,
+        source_handle: edge.sourceHandle, // React Flow använder 'sourceHandle'
+        target_handle: edge.targetHandle, // React Flow använder 'targetHandle'
+        board_id: boardId, // 🔥 Koppla till board
+      });
+      if (error) console.error("Error creating edge:", error);
+    },
+    [boardId],
+  );
 
   // 6. Ta bort Edge från DB
   const deleteEdgeFromDb = async (edgeId: string) => {
@@ -383,22 +502,26 @@ export default function Canvas() {
   };
 
   // 7. Skapa Drawing i DB
-  const createDrawingInDb = async (drawing: Drawing) => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (!session?.user) return;
+  const createDrawingInDb = useCallback(
+    async (drawing: Drawing) => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.user || !boardId) return;
 
-    const { error } = await supabase.from("drawings").insert({
-      id: drawing.id,
-      user_id: session.user.id,
-      points: drawing.points, // Supabase hanterar JSON-konvertering automatiskt oftast, annars JSON.stringify
-      color: drawing.color,
-      width: drawing.width,
-    });
+      const { error } = await supabase.from("drawings").insert({
+        id: drawing.id,
+        user_id: session.user.id,
+        board_id: boardId, // 🔥 Koppla till board
+        points: drawing.points, // Supabase hanterar JSON-konvertering automatiskt oftast, annars JSON.stringify
+        color: drawing.color,
+        width: drawing.width,
+      });
 
-    if (error) console.error("Error creating drawing:", error);
-  };
+      if (error) console.error("Error creating drawing:", error);
+    },
+    [boardId],
+  );
 
   // 8. Ta bort Drawing från DB
   const deleteDrawingFromDb = async (drawingId: string) => {
@@ -658,12 +781,18 @@ export default function Canvas() {
   );
 
   const onMagic = useCallback(
-    async (nodeId: string) => {
+    async (nodeId: string, action: "organize" | "analyze" = "organize") => {
       // 🔥 FIX: Använd instansen för att hämta noden, så vi slipper beroende till 'nodes'
       const node = reactFlowInstance?.getNode(nodeId);
       if (!node) return;
 
-      console.log("✨ AI Magic startad för nod:", nodeId);
+      // 🔥 NY: Hämta alla existerande taggar för att guida AI
+      const allNodes = reactFlowInstance?.getNodes() || [];
+      const existingTags = Array.from(
+        new Set(allNodes.flatMap((n) => (n.data.tags as string[]) || [])),
+      );
+
+      console.log(`✨ AI Magic (${action}) startad för nod:`, nodeId);
 
       // 1. Sätt noden i "processing" state
       setNodes((nds) =>
@@ -692,7 +821,8 @@ export default function Canvas() {
             body: {
               nodeId,
               content: node.data.label || "", // Skicka texten (HTML från editorn), fallback till tom sträng
-              action: "organize", // 🔥 ÄNDRING: Strukturera istället för analysera
+              action: action, // 🔥 Skicka vald action
+              availableTags: existingTags, // 🔥 Skicka med befintliga taggar till AI
             },
             // 🔥 FIX: Skicka med token explicit ifall klienten tappat den
             headers: {
@@ -706,21 +836,36 @@ export default function Canvas() {
         console.log("✨ AI svar mottaget:", data);
 
         // 3. Uppdatera UI med svaret direkt (för snabbhet)
-        setNodes((nds) =>
-          nds.map((node) => {
-            if (node.id === nodeId) {
-              return {
-                ...node,
-                data: {
-                  ...node.data,
-                  isProcessing: false,
-                  label: data.data.content, // 🔥 ÄNDRING: Uppdatera texten med strukturerat innehåll
-                },
-              };
-            }
-            return node;
-          }),
-        );
+        // Hämta noden igen för att vara säker på att vi har senaste state
+        const currentNode = reactFlowInstance?.getNode(nodeId);
+        if (currentNode) {
+          const updatedData = {
+            ...currentNode.data,
+            isProcessing: false,
+          } as NoteData;
+
+          if (action === "organize") {
+            updatedData.label = data.data.content;
+          } else if (action === "analyze") {
+            updatedData.summary = data.data.summary;
+
+            // 🔥 FIX: Filtrera taggar strikt mot existerande och välj max 1
+            const rawTags = (data.data.tags as string[]) || [];
+            const validTags = rawTags.filter((t) => existingTags.includes(t));
+
+            updatedData.aiTags = validTags.length > 0 ? [validTags[0]] : [];
+          }
+
+          const updatedNode = { ...currentNode, data: updatedData };
+
+          // Uppdatera state
+          setNodes((nds) =>
+            nds.map((n) => (n.id === nodeId ? updatedNode : n)),
+          );
+
+          // Spara till DB
+          saveNodeToDb(updatedNode);
+        }
       } catch (err) {
         console.error("AI Analysis failed:", err);
         // Återställ processing state vid fel
@@ -733,7 +878,7 @@ export default function Canvas() {
         );
       }
     },
-    [reactFlowInstance, setNodes], // 🔥 FIX: Tog bort 'nodes' från deps för stabilitet
+    [reactFlowInstance, setNodes, saveNodeToDb], // 🔥 FIX: Tog bort 'nodes' från deps för stabilitet
   );
 
   const createNodeWithHandlers = useCallback(
@@ -1033,7 +1178,7 @@ export default function Canvas() {
       }
       setCurrentPoints([]);
     },
-    [isDrawing, currentPoints],
+    [isDrawing, currentPoints, createDrawingInDb],
   );
 
   /* ========================= 
@@ -1048,7 +1193,7 @@ export default function Canvas() {
       createEdgeInDb(newEdge); // Spara till DB
       saveSnapshot(nodes, updatedEdges);
     },
-    [nodes, edges, historyIndex], // Lägg till edges i deps
+    [nodes, edges, historyIndex, createEdgeInDb], // Lägg till edges i deps
   );
 
   const onEdgeClick = useCallback(
@@ -1097,6 +1242,16 @@ export default function Canvas() {
       }, 300); // 🔥 FIX: Öka till 300ms för att inte blockera långsamma dubbelklick
     },
     [isDrawingMode, menuState.isOpen],
+  );
+
+  // 🔥 FIX: Stäng menyn när man klickar på en nod
+  const onNodeClick = useCallback(
+    (_event: React.MouseEvent, _node: Node) => {
+      if (menuState.isOpen) {
+        setMenuState((prev) => ({ ...prev, isOpen: false }));
+      }
+    },
+    [menuState.isOpen],
   );
 
   const onNodeDragStop = useCallback(
@@ -1288,54 +1443,7 @@ export default function Canvas() {
       const selectedNode = nodes.find((n) => n.selected);
 
       if (selectedNode && optionId === "ai-organize") {
-        // 1. Sätt processing state
-        setNodes((nds) =>
-          nds.map((n) =>
-            n.id === selectedNode.id
-              ? { ...n, data: { ...n.data, isProcessing: true } }
-              : n,
-          ),
-        );
-
-        // 2. Anropa Edge Function
-        supabase.auth.getSession().then(async ({ data: { session } }) => {
-          if (!session) return;
-
-          const { data, error } = await supabase.functions.invoke(
-            "analyze-node",
-            {
-              body: {
-                nodeId: selectedNode.id,
-                content: selectedNode.data.label || "",
-                action: "organize", // 🔥 Ny action-typ
-              },
-              headers: {
-                Authorization: `Bearer ${session.access_token}`,
-              },
-            },
-          );
-
-          if (!error && data?.success) {
-            // 3. Uppdatera nodens innehåll med den strukturerade texten
-            setNodes((nds) =>
-              nds.map((n) => {
-                if (n.id === selectedNode.id) {
-                  const updatedNode = {
-                    ...n,
-                    data: {
-                      ...n.data,
-                      isProcessing: false,
-                      label: data.data.content,
-                    },
-                  };
-                  saveNodeToDb(updatedNode); // Spara till DB
-                  return updatedNode;
-                }
-                return n;
-              }),
-            );
-          }
-        });
+        onMagic(selectedNode.id, "organize");
       }
       // Stäng menyn (redan hanterat i början av funktionen)
     }
@@ -1372,6 +1480,7 @@ export default function Canvas() {
         onConnect={onConnect}
         onEdgeClick={onEdgeClick}
         onNodesDelete={onNodesDelete} // 🔥 Koppla in Backspace-hantering
+        onNodeClick={onNodeClick} // 🔥 FIX: Koppla in klick-hantering för noder
         onPaneClick={onPaneClick}
         onNodeDragStop={onNodeDragStop}
         onInit={(instance) => {
@@ -1509,6 +1618,27 @@ export default function Canvas() {
             zIndex: 1000,
           }}
         >
+          {/* 🔥 Share Button */}
+          <button
+            onClick={() => setShowShareModal(true)}
+            style={{
+              background: "#6366f1",
+              border: "none",
+              borderRadius: "8px",
+              padding: "8px 12px",
+              color: "white",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              fontWeight: 600,
+              fontSize: "14px",
+            }}
+          >
+            <Share2 size={16} />
+            Dela
+          </button>
+
           <button onClick={undo}>↶</button>
           <button onClick={redo}>↷</button>
         </div>
@@ -1542,6 +1672,14 @@ export default function Canvas() {
         accept="image/*"
         onChange={handleFileChange}
       />
+
+      {/* 🔥 Share Modal */}
+      {showShareModal && boardId && (
+        <ShareModal
+          boardId={boardId}
+          onClose={() => setShowShareModal(false)}
+        />
+      )}
     </div>
   );
 }

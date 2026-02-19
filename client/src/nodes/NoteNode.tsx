@@ -1,4 +1,10 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   Handle,
   Position,
@@ -8,7 +14,7 @@ import {
   type NodeProps,
 } from "@xyflow/react";
 import RichTextEditor from "../components/RichTextEditor";
-import { Sparkles, Loader2, Tag, Plus, X } from "lucide-react";
+import { Sparkles, Loader2, Tag, Plus, X, Wand2, FileText } from "lucide-react";
 
 export type NoteData = {
   title?: string;
@@ -19,7 +25,7 @@ export type NoteData = {
   aiTags?: string[]; // 🔥 NY: AI-genererade taggar
   summary?: string; // 🔥 NY: AI-sammanfattning
   isProcessing?: boolean;
-  onMagic?: (nodeId: string) => void;
+  onMagic?: (nodeId: string, action: "organize" | "analyze") => void;
   onTagsChange?: (nodeId: string, tags: string[]) => void;
   onAiTagsChange?: (nodeId: string, tags: string[]) => void;
   onSummaryChange?: (nodeId: string, summary: string) => void;
@@ -123,9 +129,13 @@ export default function NoteNode({
   const [value, setValue] = useState(data.label ?? "");
   const [title, setTitle] = useState(data.title ?? "");
   const containerRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null); // 🔥 NY: Wrapper för att mäta innehåll säkert
   const [showTagMenu, setShowTagMenu] = useState(false);
+  const [showMagicMenu, setShowMagicMenu] = useState(false);
   const [customTag, setCustomTag] = useState("");
   const isResizingRef = useRef(false); // 🔥 Håll koll på om vi drar manuellt
+  const [dynamicMinHeight, setDynamicMinHeight] = useState(150); // 🔥 Håll koll på innehållets höjd
 
   const toggleTag = (tag: string) => {
     const currentTags = data.tags || [];
@@ -182,39 +192,77 @@ export default function NoteNode({
   }, [data.title]);
 
   // 🔥 Auto-resize logic: Mät texten och expandera noden om det behövs
-  useEffect(() => {
-    if (!containerRef.current) return;
+  const checkSize = useCallback(() => {
+    if (!containerRef.current || !innerRef.current) return;
 
-    const checkSize = () => {
-      // Om användaren håller på att ändra storlek manuellt, gör inget auto-resize!
-      if (isResizingRef.current) return;
+    // 1. Header-höjd (där innerRef börjar)
+    const headerHeight = innerRef.current.offsetTop;
 
-      // Vi mäter containerns scrollHeight direkt eftersom Tiptap expanderar den
-      const contentHeight = containerRef.current!.scrollHeight;
-      // Ingen extra buffer behövs om vi mäter containern direkt, men vi sätter en min-höjd
-      const totalHeight = contentHeight;
+    // 2. Mät Editor-innehållet (Själva texten)
+    // Vi mäter .tiptap-elementet direkt eftersom containern nu kan vara stretchad (flex: 1)
+    const editorEl = innerRef.current.querySelector(".tiptap");
+    const editorContentHeight = editorEl ? editorEl.scrollHeight : 60;
+    const editorPadding = 24; // 12px top + 12px bottom
 
-      const currentHeight = containerRef.current!.offsetHeight;
-      const currentWidth = containerRef.current!.offsetWidth;
+    // 3. Mät Sammanfattning
+    const summaryEl = innerRef.current.querySelector(".summary-container");
+    const summaryHeight = summaryEl ? summaryEl.scrollHeight + 8 : 0;
 
-      const minHeight = 150;
-      const targetHeight = Math.max(minHeight, totalHeight);
+    // 4. Total nödvändig höjd (+16px padding i botten)
+    const requiredHeight =
+      headerHeight + editorContentHeight + editorPadding + summaryHeight + 16;
 
-      // Uppdatera bara om höjden skiljer sig markant
-      if (Math.abs(targetHeight - currentHeight) > 5) {
-        onResizeRef.current?.(id, currentWidth, targetHeight);
-      }
+    setDynamicMinHeight(requiredHeight);
+
+    if (isResizingRef.current) return;
+
+    const currentHeight = containerRef.current.offsetHeight;
+    const currentWidth = containerRef.current.offsetWidth;
+
+    // Expandera bara om innehållet faktiskt kräver mer plats än vad som finns.
+    // Vi tvingar inte ihop noden om användaren har gjort den större manuellt.
+    if (requiredHeight > currentHeight) {
+      onResizeRef.current?.(id, currentWidth, requiredHeight);
+    }
+  }, [id, data.isEditing, data.summary]);
+
+  // 🔥 FIX: Använd useLayoutEffect för att mäta INNAN paint (löser flimmer/sync-problem)
+  useLayoutEffect(() => {
+    // Vi observerar contentRef eftersom det är där texten och summary bor
+    const target = contentRef.current || innerRef.current;
+    if (!target) return;
+
+    // 1. ResizeObserver: Lyssna på storleksändringar (t.ex. radbrytning)
+    const resizeObserver = new ResizeObserver(() => {
+      checkSize();
+    });
+    resizeObserver.observe(target);
+
+    // 2. MutationObserver: Lyssna på DOM-ändringar (t.ex. när summary läggs till/tas bort)
+    const mutationObserver = new MutationObserver(() => {
+      checkSize();
+    });
+    mutationObserver.observe(target, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+    });
+
+    // Kör check direkt
+    checkSize();
+
+    return () => {
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
     };
-
-    // Kör checkSize direkt och när bredden ändras (ResizeObserver)
-    const observer = new ResizeObserver(checkSize);
-    observer.observe(containerRef.current);
-
-    // Kör en extra check efter en kort stund för att låta Tiptap rendera klart
-    setTimeout(checkSize, 100);
-
-    return () => observer.disconnect();
-  }, [value, id, data.isEditing]); // Uppdatera när value eller edit-läge ändras
+  }, [
+    checkSize,
+    data.summary,
+    data.tags,
+    data.aiTags,
+    data.isProcessing,
+    value,
+  ]);
 
   const stopEdit = () => {
     // Spara sker via onChange i RichTextEditor, här signalerar vi bara stop
@@ -262,7 +310,7 @@ export default function NoteNode({
         padding: "16px",
         borderRadius: 16,
         background: data.color ?? "#f1f1f1",
-        border: selected ? "2px solid #6366f1" : "1px solid #ddd",
+        border: selected ? "2px solid #6366f1" : "1px solid rgba(0,0,0,0.1)",
         boxShadow: boxShadow,
         boxSizing: "border-box",
         position: "relative",
@@ -271,6 +319,7 @@ export default function NoteNode({
         overflow: "visible", // Viktigt för att glow ska synas utanför
         touchAction: "none", // 🔥 FIX: Förhindra browser-zoom/pan på noden
         willChange: "width, height", // 🔥 FIX: Hint till webbläsaren för prestanda
+        zIndex: 50, // 🔥 FIX: Se till att resizer ligger överst
       }}
     >
       {/* Tags Display (Top Left Label) */}
@@ -364,7 +413,7 @@ export default function NoteNode({
       <NodeResizer
         isVisible={selected} // Visa bara handles när noden är vald (snyggare)
         minWidth={300}
-        minHeight={150}
+        minHeight={Math.max(150, dynamicMinHeight)} // 🔥 Använd dynamisk höjd
         onResizeStart={() => {
           isResizingRef.current = true; // 🔥 Pausa auto-resize
         }}
@@ -376,6 +425,7 @@ export default function NoteNode({
           isResizingRef.current = false; // 🔥 Återaktivera auto-resize
           // Spara till DB när vi släpper (förhindrar lagg)
           data.onResizeEnd?.(id, params.width, params.height);
+          checkSize(); // 🔥 Säkerställ att vi inte lämnar noden i ett ogiltigt läge
         }}
         handleStyle={{
           width: 8,
@@ -389,24 +439,33 @@ export default function NoteNode({
       />
 
       {/* Titel-input */}
-      <input
-        className="nodrag"
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        onBlur={() => data.onTitleChange?.(id, title)}
-        placeholder="Rubrik..."
+      {/* 🔥 FIX: Wrapper för att skydda titeln från att täckas av editorn */}
+      <div
         style={{
-          width: "100%",
-          background: "transparent",
-          border: "none",
-          outline: "none",
-          fontSize: 16,
-          fontWeight: "bold",
-          color: "#111",
+          position: "relative",
+          zIndex: 10,
           marginBottom: 8,
-          textAlign: "center",
+          flexShrink: 0, // Förhindra att titeln krymper
         }}
-      />
+      >
+        <input
+          className="nodrag"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onBlur={() => data.onTitleChange?.(id, title)}
+          placeholder="Rubrik..."
+          style={{
+            width: "100%",
+            background: "transparent",
+            border: "none",
+            outline: "none",
+            fontSize: 16,
+            fontWeight: "bold",
+            color: "#111",
+            textAlign: "center",
+          }}
+        />
+      </div>
 
       {/* Färgpalett (visas när vald) */}
       {selected && (
@@ -448,6 +507,7 @@ export default function NoteNode({
           onClick={(e) => {
             e.stopPropagation();
             setShowTagMenu(!showTagMenu);
+            setShowMagicMenu(false);
           }}
           style={{
             position: "absolute",
@@ -556,8 +616,8 @@ export default function NoteNode({
         <div
           onClick={(e) => {
             e.stopPropagation();
-            console.log("✨ Magic button clicked");
-            data.onMagic?.(id);
+            setShowMagicMenu(!showMagicMenu);
+            setShowTagMenu(false);
           }}
           onMouseDown={(e) => {
             e.stopPropagation();
@@ -582,6 +642,78 @@ export default function NoteNode({
           ) : (
             <Sparkles size={14} color="#6366f1" fill="none" />
           )}
+        </div>
+      )}
+
+      {/* Magic Menu Popover */}
+      {selected && showMagicMenu && (
+        <div
+          className="nodrag"
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: "absolute",
+            top: 24,
+            right: 0,
+            width: 180,
+            background: "#222",
+            border: "1px solid #444",
+            borderRadius: 8,
+            padding: 4,
+            zIndex: 20,
+            boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+          }}
+        >
+          <div
+            onClick={() => {
+              data.onMagic?.(id, "organize");
+              setShowMagicMenu(false);
+            }}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "8px",
+              fontSize: "12px",
+              color: "#eee",
+              cursor: "pointer",
+              borderRadius: 4,
+              transition: "background 0.1s",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "#333")}
+            onMouseLeave={(e) =>
+              (e.currentTarget.style.background = "transparent")
+            }
+          >
+            <Wand2 size={14} color="#6366f1" />
+            <span>Städa text</span>
+          </div>
+          <div
+            onClick={() => {
+              data.onMagic?.(id, "analyze");
+              setShowMagicMenu(false);
+            }}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "8px",
+              fontSize: "12px",
+              color: "#eee",
+              cursor: "pointer",
+              borderRadius: 4,
+              transition: "background 0.1s",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "#333")}
+            onMouseLeave={(e) =>
+              (e.currentTarget.style.background = "transparent")
+            }
+          >
+            <FileText size={14} color="#10b981" />
+            <span>Analysera</span>
+          </div>
         </div>
       )}
 
@@ -643,65 +775,93 @@ export default function NoteNode({
         selected={selected}
       />
 
+      {/* 🔥 FIX: innerRef är nu en transparent wrapper för både editor och summary */}
       <div
+        ref={innerRef}
         style={{
-          flex: 1,
           display: "flex",
           flexDirection: "column",
-          background: "#3a3a3a",
-          borderRadius: 12,
-          padding: 12,
-          color: "white",
-          overflow: "hidden",
+          position: "relative",
+          zIndex: 1,
+          width: "100%", // 🔥 FIX: Säkerställ att den fyller bredden
+          flex: 1, // 🔥 FIX: Fyll ut vertikalt utrymme i noden
+          minHeight: 0, // Viktigt för flex-nesting
         }}
       >
-        <RichTextEditor
-          content={value}
-          isEditing={!!data.isEditing}
-          startListeningOnMount={!!data.startListening}
-          onChange={(html) => {
-            setValue(html);
-            data.onChange(id, html);
+        {/* 🔥 NY: Content Wrapper som vi mäter på */}
+        <div
+          ref={contentRef}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            width: "100%",
+            flex: 1, // 🔥 FIX: Låt denna växa också
           }}
-          onBlur={stopEdit}
-        />
-
-        {/* 🔥 NY: Visa sammanfattning om den finns */}
-        {data.summary && (
+        >
+          {/* Editor Container (Mörk ruta) */}
           <div
             style={{
-              marginTop: 12,
-              padding: "8px 12px",
-              background: "rgba(0, 0, 0, 0.2)",
-              borderRadius: 8,
-              fontSize: "12px",
-              color: "#ccc",
-              fontStyle: "italic",
-              borderLeft: "2px solid #6366f1",
-              position: "relative",
-              paddingRight: "24px", // Plats för krysset
+              background: "#3a3a3a",
+              borderRadius: 12,
+              padding: 12,
+              color: "white",
+              display: "flex",
+              flexDirection: "column",
+              minHeight: "60px", // Minsta höjd för editorn
+              flex: 1, // 🔥 FIX: Låt editorn växa och fylla utrymmet (knuffar ner summary)
             }}
           >
-            {data.summary}
-            <div
-              onClick={(e) => {
-                e.stopPropagation();
-                data.onSummaryChange?.(id, "");
+            <RichTextEditor
+              content={value}
+              isEditing={!!data.isEditing}
+              startListeningOnMount={!!data.startListening}
+              onChange={(html) => {
+                setValue(html);
+                data.onChange(id, html);
               }}
-              style={{
-                position: "absolute",
-                top: 4,
-                right: 4,
-                cursor: "pointer",
-                opacity: 0.6,
-                padding: 2,
-              }}
-              title="Ta bort sammanfattning"
-            >
-              <X size={12} />
-            </div>
+              onBlur={stopEdit}
+            />
           </div>
-        )}
+
+          {/* Sammanfattning */}
+          {data.summary && (
+            <div
+              className="summary-container" // 🔥 Klass för att kunna mäta elementet
+              style={{
+                marginTop: 8,
+                padding: "8px 12px",
+                background: "rgba(0, 0, 0, 0.05)",
+                borderRadius: 8,
+                fontSize: "12px",
+                color: "#444",
+                fontStyle: "italic",
+                borderLeft: "2px solid #6366f1",
+                position: "relative",
+                paddingRight: "24px",
+                flexShrink: 0, // Krymp inte
+              }}
+            >
+              {data.summary}
+              <div
+                onClick={(e) => {
+                  e.stopPropagation();
+                  data.onSummaryChange?.(id, "");
+                }}
+                style={{
+                  position: "absolute",
+                  top: 4,
+                  right: 4,
+                  cursor: "pointer",
+                  opacity: 0.6,
+                  padding: 2,
+                }}
+                title="Ta bort sammanfattning"
+              >
+                <X size={12} />
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
