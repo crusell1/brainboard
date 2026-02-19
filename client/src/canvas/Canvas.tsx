@@ -123,6 +123,8 @@ export default function Canvas() {
             color: n.color ?? "#f1f1f1",
             isEditing: false,
             tags: (n as any).tags || [],
+            summary: (n as any).summary, // 🔥 Hämta summary
+            aiTags: (n as any).ai_tags || [], // 🔥 Hämta ai_tags
           },
         }));
         setNodes(loadedNodes);
@@ -235,6 +237,8 @@ export default function Canvas() {
                         label:
                           newNote.type === "image" ? "Bild" : newNote.content,
                         color: newNote.color,
+                        summary: (newNote as any).summary, // 🔥 Synka summary
+                        aiTags: (newNote as any).ai_tags || [], // 🔥 Synka ai_tags
                       },
                     }
                   : n,
@@ -620,8 +624,47 @@ export default function Canvas() {
     [saveNodeToDb, setNodes],
   );
 
+  const updateNodeAiTags = useCallback(
+    (nodeId: string, aiTags: string[]) => {
+      setNodes((nds) =>
+        nds.map((node) => {
+          if (node.id === nodeId) {
+            // Vi uppdaterar ai_tags i data-objektet
+            const newNode = { ...node, data: { ...node.data, aiTags } };
+            saveNodeToDb(newNode);
+            return newNode;
+          }
+          return node;
+        }),
+      );
+    },
+    [saveNodeToDb, setNodes],
+  );
+
+  const updateNodeSummary = useCallback(
+    (nodeId: string, summary: string) => {
+      setNodes((nds) =>
+        nds.map((node) => {
+          if (node.id === nodeId) {
+            const newNode = { ...node, data: { ...node.data, summary } };
+            saveNodeToDb(newNode);
+            return newNode;
+          }
+          return node;
+        }),
+      );
+    },
+    [saveNodeToDb, setNodes],
+  );
+
   const onMagic = useCallback(
-    (nodeId: string) => {
+    async (nodeId: string) => {
+      // 🔥 FIX: Använd instansen för att hämta noden, så vi slipper beroende till 'nodes'
+      const node = reactFlowInstance?.getNode(nodeId);
+      if (!node) return;
+
+      console.log("✨ AI Magic startad för nod:", nodeId);
+
       // 1. Sätt noden i "processing" state
       setNodes((nds) =>
         nds.map((node) => {
@@ -632,8 +675,37 @@ export default function Canvas() {
         }),
       );
 
-      // 2. Simulera AI-anrop (Mock)
-      setTimeout(() => {
+      try {
+        // 🔥 FIX: Hämta session explicit för att säkerställa att vi har en token
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!session) {
+          throw new Error("Du måste vara inloggad för att använda AI.");
+        }
+
+        // 2. Anropa Edge Function på riktigt
+        const { data, error } = await supabase.functions.invoke(
+          "analyze-node",
+          {
+            body: {
+              nodeId,
+              content: node.data.label || "", // Skicka texten (HTML från editorn), fallback till tom sträng
+              action: "organize", // 🔥 ÄNDRING: Strukturera istället för analysera
+            },
+            // 🔥 FIX: Skicka med token explicit ifall klienten tappat den
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+            },
+          },
+        );
+
+        if (error) throw error;
+
+        console.log("✨ AI svar mottaget:", data);
+
+        // 3. Uppdatera UI med svaret direkt (för snabbhet)
         setNodes((nds) =>
           nds.map((node) => {
             if (node.id === nodeId) {
@@ -642,16 +714,26 @@ export default function Canvas() {
                 data: {
                   ...node.data,
                   isProcessing: false,
-                  tags: ["AI", "Summary", "Concept"], // Mock data
+                  label: data.data.content, // 🔥 ÄNDRING: Uppdatera texten med strukturerat innehåll
                 },
               };
             }
             return node;
           }),
         );
-      }, 1500);
+      } catch (err) {
+        console.error("AI Analysis failed:", err);
+        // Återställ processing state vid fel
+        setNodes((nds) =>
+          nds.map((n) =>
+            n.id === nodeId
+              ? { ...n, data: { ...n.data, isProcessing: false } }
+              : n,
+          ),
+        );
+      }
     },
-    [setNodes],
+    [reactFlowInstance, setNodes], // 🔥 FIX: Tog bort 'nodes' från deps för stabilitet
   );
 
   const createNodeWithHandlers = useCallback(
@@ -669,6 +751,8 @@ export default function Canvas() {
         onColorChange: onColorChange,
         onMagic: onMagic,
         onTagsChange: updateNodeTags,
+        onAiTagsChange: updateNodeAiTags,
+        onSummaryChange: updateNodeSummary,
       },
     }),
     [
@@ -682,6 +766,8 @@ export default function Canvas() {
       onColorChange,
       onMagic,
       updateNodeTags,
+      updateNodeAiTags,
+      updateNodeSummary,
     ],
   );
 
@@ -1184,6 +1270,74 @@ export default function Canvas() {
       const updatedNodes = [...nodes, newNode];
       setNodes(updatedNodes);
       saveSnapshot(updatedNodes, edges);
+    }
+
+    // Hantera AI-actions (Placeholder för framtida logik)
+    if (optionId.startsWith("ai-")) {
+      if (!reactFlowInstance) return;
+
+      // Hitta noden som menyn öppnades över (eller närmaste valda)
+      // För enkelhetens skull, låt oss anta att vi jobbar med den senast valda noden eller skapar en ny om ingen är vald.
+      // Men i ditt fall verkar menyn öppnas på en tom yta eller över en nod.
+      // Om vi klickar "AI" i menyn, vill vi oftast applicera det på en *befintlig* nod om vi högerklickade på den,
+      // eller skapa en ny om vi klickade på canvas.
+
+      // I din nuvarande implementation av onPaneClick öppnas menyn på koordinater.
+      // Vi behöver veta vilken nod som är "aktiv".
+      // Låt oss söka efter en vald nod.
+      const selectedNode = nodes.find((n) => n.selected);
+
+      if (selectedNode && optionId === "ai-organize") {
+        // 1. Sätt processing state
+        setNodes((nds) =>
+          nds.map((n) =>
+            n.id === selectedNode.id
+              ? { ...n, data: { ...n.data, isProcessing: true } }
+              : n,
+          ),
+        );
+
+        // 2. Anropa Edge Function
+        supabase.auth.getSession().then(async ({ data: { session } }) => {
+          if (!session) return;
+
+          const { data, error } = await supabase.functions.invoke(
+            "analyze-node",
+            {
+              body: {
+                nodeId: selectedNode.id,
+                content: selectedNode.data.label || "",
+                action: "organize", // 🔥 Ny action-typ
+              },
+              headers: {
+                Authorization: `Bearer ${session.access_token}`,
+              },
+            },
+          );
+
+          if (!error && data?.success) {
+            // 3. Uppdatera nodens innehåll med den strukturerade texten
+            setNodes((nds) =>
+              nds.map((n) => {
+                if (n.id === selectedNode.id) {
+                  const updatedNode = {
+                    ...n,
+                    data: {
+                      ...n.data,
+                      isProcessing: false,
+                      label: data.data.content,
+                    },
+                  };
+                  saveNodeToDb(updatedNode); // Spara till DB
+                  return updatedNode;
+                }
+                return n;
+              }),
+            );
+          }
+        });
+      }
+      // Stäng menyn (redan hanterat i början av funktionen)
     }
   };
 

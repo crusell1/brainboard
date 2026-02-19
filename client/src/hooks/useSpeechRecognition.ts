@@ -45,6 +45,12 @@ export default function useSpeechRecognition() {
   const isStoppedManually = useRef(false); // 🔥 Håll koll på om VI stoppade den
   const lastProcessedIndex = useRef(-1); // 🔥 Håll koll på vilket index vi senast tog emot
 
+  // 🔥 NY: Ref för att kunna starta om sig själv inifrån onend
+  const startListeningRef = useRef<() => void>(() => {});
+  // 🔥 NY: Skydd mot oändliga loopar vid fel (t.ex. NO_SPACE)
+  const restartCount = useRef(0);
+  const lastStartTime = useRef(0);
+
   useEffect(() => {
     setHasSupport(
       !!(window.SpeechRecognition || window.webkitSpeechRecognition),
@@ -55,6 +61,7 @@ export default function useSpeechRecognition() {
   useEffect(() => {
     return () => {
       if (recognitionRef.current) {
+        isStoppedManually.current = true; // 🔥 Markera som manuellt stopp vid unmount för att undvika fel
         recognitionRef.current.abort();
       }
     };
@@ -65,9 +72,18 @@ export default function useSpeechRecognition() {
       window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) return;
 
+    // Återställ räknare om det var länge sedan vi startade (stabil session > 5s)
+    if (Date.now() - lastStartTime.current > 5000) {
+      restartCount.current = 0;
+    }
+    lastStartTime.current = Date.now();
+
     // 1. Döda eventuell gammal instans för att garantera en "fresh start"
     if (recognitionRef.current) {
-      recognitionRef.current.abort();
+      isStoppedManually.current = true; // 🔥 Markera som manuellt stopp innan vi dödar den
+      const oldRec = recognitionRef.current;
+      recognitionRef.current = null; // 🔥 Koppla bort ref direkt så onend ignorerar den
+      oldRec.abort();
     }
 
     isStoppedManually.current = false; // Vi vill lyssna nu
@@ -93,18 +109,27 @@ export default function useSpeechRecognition() {
     };
 
     recognition.onend = () => {
+      // 🔥 FIX: Ignorera onend från gamla instanser för att undvika loopar
+      if (recognition !== recognitionRef.current) {
+        return;
+      }
+
       // 🔥 FIX: Om vi inte stoppade manuellt, starta igen direkt!
       if (isStoppedManually.current) {
         console.log("🛑 Lyssning avslutad (manuellt)");
         setIsListening(false);
       } else {
-        // 🔥 VIKTIGT: Vi kan inte starta om samma instans.
-        // Vi sätter isListening till false, men eftersom vi vill ha "continuous",
-        // måste vi hantera omstarten utifrån eller via en rekursiv lösning.
-        // Enklast här: Låt den dö, men logga det. För en MVP räcker det att användaren trycker igen.
-        // Vill du ha 100% continuous måste vi anropa startListening() här, men det kräver att funktionen är stabil.
         console.log("⚠️ Webbläsaren avbröt sessionen.");
-        setIsListening(false);
+
+        // Försök starta om om vi inte kraschar för ofta (max 10 ggr på kort tid)
+        if (restartCount.current < 10) {
+          console.log("🔄 Startar om sessionen automatiskt...");
+          restartCount.current += 1;
+          startListeningRef.current();
+        } else {
+          console.error("❌ För många omstarter (troligen fel), stoppar.");
+          setIsListening(false);
+        }
       }
     };
 
@@ -130,6 +155,11 @@ export default function useSpeechRecognition() {
       setIsListening(false);
     }
   }, []);
+
+  // 🔥 NY: Uppdatera ref så den pekar på senaste startListening
+  useEffect(() => {
+    startListeningRef.current = startListening;
+  }, [startListening]);
 
   const stopListening = useCallback(() => {
     console.log("🛑 Stoppar lyssning...");

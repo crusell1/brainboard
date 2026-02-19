@@ -157,6 +157,7 @@ export default function RichTextEditor({
     ],
     content: content,
     editable: isEditing,
+    autofocus: isEditing ? "end" : false, // 🔥 FIX: Säkerställ att vi får fokus direkt vid mount
     onUpdate: ({ editor }) => {
       onChange(editor.getHTML());
     },
@@ -175,11 +176,9 @@ export default function RichTextEditor({
   });
 
   // Auto-starta lyssning om flaggan är satt (t.ex. från Radial Menu)
-  const hasAutoStartedRef = useRef(false);
   useEffect(() => {
-    if (startListeningOnMount && !hasAutoStartedRef.current) {
+    if (startListeningOnMount) {
       startListening();
-      hasAutoStartedRef.current = true;
     }
   }, [startListeningOnMount, startListening]);
 
@@ -213,6 +212,7 @@ export default function RichTextEditor({
       if (editor.getText() === "" && content === "") return;
       // Vi sätter bara content om skillnaden är signifikant eller vid init
       // För en enkel implementation litar vi på Tiptaps content management
+      editor.commands.setContent(content);
     }
   }, [content, editor]);
 

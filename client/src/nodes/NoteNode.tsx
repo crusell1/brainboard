@@ -16,9 +16,13 @@ export type NoteData = {
   isEditing?: boolean;
   startListening?: boolean;
   tags?: string[];
+  aiTags?: string[]; // 🔥 NY: AI-genererade taggar
+  summary?: string; // 🔥 NY: AI-sammanfattning
   isProcessing?: boolean;
   onMagic?: (nodeId: string) => void;
   onTagsChange?: (nodeId: string, tags: string[]) => void;
+  onAiTagsChange?: (nodeId: string, tags: string[]) => void;
+  onSummaryChange?: (nodeId: string, summary: string) => void;
   onChange: (nodeId: string, value: string) => void;
   onStopEditing: (nodeId: string) => void;
   onStartEditing: (nodeId: string) => void;
@@ -143,6 +147,26 @@ export default function NoteNode({
     setCustomTag("");
   };
 
+  const approveAiTag = (tag: string) => {
+    const currentTags = data.tags || [];
+    const currentAiTags = data.aiTags || [];
+
+    // 1. Lägg till i vanliga taggar (om den inte redan finns)
+    if (!currentTags.includes(tag)) {
+      data.onTagsChange?.(id, [...currentTags, tag]);
+    }
+
+    // 2. Ta bort från AI-taggar
+    const newAiTags = currentAiTags.filter((t) => t !== tag);
+    data.onAiTagsChange?.(id, newAiTags);
+  };
+
+  const deleteAiTag = (tag: string) => {
+    const currentAiTags = data.aiTags || [];
+    const newAiTags = currentAiTags.filter((t) => t !== tag);
+    data.onAiTagsChange?.(id, newAiTags);
+  };
+
   // Spara onResize i en ref för att kunna använda den i useEffect utan att skapa loopar
   const onResizeRef = useRef(data.onResize);
   useEffect(() => {
@@ -250,12 +274,13 @@ export default function NoteNode({
       }}
     >
       {/* Tags Display (Top Left Label) */}
-      {data.tags && data.tags.length > 0 && (
+      {((data.tags && data.tags.length > 0) ||
+        (data.aiTags && data.aiTags.length > 0)) && (
         <div
           className="nodrag"
           style={{
             position: "absolute",
-            top: -10,
+            top: 0,
             left: 16,
             display: "flex",
             gap: 4,
@@ -265,7 +290,7 @@ export default function NoteNode({
             pointerEvents: "none",
           }}
         >
-          {data.tags.map((tag, i) => (
+          {data.tags?.map((tag, i) => (
             <div
               key={i}
               onClick={(e) => {
@@ -292,6 +317,45 @@ export default function NoteNode({
               <Tag size={8} strokeWidth={3} />
               {tag}
               <X size={8} strokeWidth={3} style={{ opacity: 0.7 }} />
+            </div>
+          ))}
+
+          {/* 🔥 NY: Visa AI-taggar */}
+          {data.aiTags?.map((tag, i) => (
+            <div
+              key={`ai-${i}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                approveAiTag(tag);
+              }}
+              style={{
+                fontSize: "10px",
+                fontWeight: 600,
+                background: "transparent",
+                color: getTagColor(tag),
+                padding: "2px 6px 2px 6px",
+                borderRadius: "12px",
+                display: "flex",
+                alignItems: "center",
+                gap: 3,
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                border: `1px dashed ${getTagColor(tag)}`, // Streckad kant för AI
+                cursor: "pointer",
+                pointerEvents: "auto",
+              }}
+              title="Klicka för att godkänna (flytta till vanliga taggar)"
+            >
+              <Sparkles size={8} strokeWidth={3} />
+              {tag}
+              <div
+                onClick={(e) => {
+                  e.stopPropagation();
+                  deleteAiTag(tag);
+                }}
+                style={{ display: "flex", alignItems: "center" }}
+              >
+                <X size={8} strokeWidth={3} style={{ opacity: 0.7 }} />
+              </div>
             </div>
           ))}
         </div>
@@ -492,7 +556,12 @@ export default function NoteNode({
         <div
           onClick={(e) => {
             e.stopPropagation();
+            console.log("✨ Magic button clicked");
             data.onMagic?.(id);
+          }}
+          onMouseDown={(e) => {
+            e.stopPropagation();
+            e.preventDefault(); // 🔥 FIX: Förhindra fokus-stöld
           }}
           style={{
             position: "absolute",
@@ -506,7 +575,7 @@ export default function NoteNode({
             cursor: "pointer",
             zIndex: 10,
           }}
-          title="AI✨"
+          title="Strukturera text ✨"
         >
           {data.isProcessing ? (
             <Loader2 size={14} className="animate-spin" color="#6366f1" />
@@ -596,6 +665,43 @@ export default function NoteNode({
           }}
           onBlur={stopEdit}
         />
+
+        {/* 🔥 NY: Visa sammanfattning om den finns */}
+        {data.summary && (
+          <div
+            style={{
+              marginTop: 12,
+              padding: "8px 12px",
+              background: "rgba(0, 0, 0, 0.2)",
+              borderRadius: 8,
+              fontSize: "12px",
+              color: "#ccc",
+              fontStyle: "italic",
+              borderLeft: "2px solid #6366f1",
+              position: "relative",
+              paddingRight: "24px", // Plats för krysset
+            }}
+          >
+            {data.summary}
+            <div
+              onClick={(e) => {
+                e.stopPropagation();
+                data.onSummaryChange?.(id, "");
+              }}
+              style={{
+                position: "absolute",
+                top: 4,
+                right: 4,
+                cursor: "pointer",
+                opacity: 0.6,
+                padding: 2,
+              }}
+              title="Ta bort sammanfattning"
+            >
+              <X size={12} />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
