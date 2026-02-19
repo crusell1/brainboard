@@ -1,8 +1,14 @@
+import React from "react";
+
 type DrawModeControlsProps = {
   onExit: () => void;
+  style?: React.CSSProperties;
 };
 
-export default function DrawModeControls({ onExit }: DrawModeControlsProps) {
+export default function DrawModeControls({
+  onExit,
+  style,
+}: DrawModeControlsProps) {
   return (
     <div
       style={{
@@ -20,6 +26,7 @@ export default function DrawModeControls({ onExit }: DrawModeControlsProps) {
         boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
         zIndex: 2000,
         pointerEvents: "auto", // Säkerställ att knappen går att klicka på
+        ...style, // 🔥 Tillåt överskuggning av stilar
       }}
     >
       <span style={{ fontWeight: 600, fontSize: "14px" }}>

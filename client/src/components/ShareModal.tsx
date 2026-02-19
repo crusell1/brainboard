@@ -328,9 +328,9 @@ export default function ShareModal({ boardId, onClose }: ShareModalProps) {
                       }}
                     >
                       {copiedId === invite.id ? (
-                        <Check size={14} />
+                        <Check size={18} color="#ffffff" />
                       ) : (
-                        <Copy size={14} />
+                        <Copy size={18} color="#ffffff" />
                       )}
                     </button>
                     <button
@@ -340,8 +340,8 @@ export default function ShareModal({ boardId, onClose }: ShareModalProps) {
                         background: "rgba(239, 68, 68, 0.1)",
                         border: "1px solid rgba(239, 68, 68, 0.3)",
                         borderRadius: "6px",
-                        width: "32px",
-                        height: "32px",
+                        width: "40px",
+                        height: "40px",
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
@@ -349,7 +349,7 @@ export default function ShareModal({ boardId, onClose }: ShareModalProps) {
                         color: "#ef4444",
                       }}
                     >
-                      <Trash2 size={14} />
+                      <Trash2 size={20} style={{ stroke: "#ef4444" }} />
                     </button>
                   </div>
                 </div>

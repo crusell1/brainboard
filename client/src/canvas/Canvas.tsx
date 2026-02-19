@@ -23,7 +23,19 @@ import DrawingLayer from "../components/DrawingLayer";
 import type { Drawing, Point } from "../types/drawing";
 import DrawModeControls from "../components/DrawModeControls";
 import ShareModal from "../components/ShareModal"; // 🔥 Importera ShareModal
-import { Share2 } from "lucide-react"; // 🔥 Importera Share-ikon
+import {
+  Share2,
+  Pencil,
+  Check,
+  X as XIcon,
+  Trash2,
+  LogOut,
+  Menu,
+  Search,
+  RotateCcw,
+  RotateCw,
+  User,
+} from "lucide-react"; // 🔥 Importera ikoner
 
 const NODE_WIDTH = 300;
 const NODE_HEIGHT = 200;
@@ -47,9 +59,26 @@ export default function Canvas() {
   > | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [boardId, setBoardId] = useState<string | null>(null); // 🔥 NY: Håll koll på aktiv board
+  const [availableBoards, setAvailableBoards] = useState<
+    { id: string; title: string; isOwner: boolean; ownerEmail?: string }[]
+  >([]); // 🔥 NY: Lista alla boards
   // 🔥 FIX: Använd useRef för timeout för att undvika race conditions vid dubbelklick
   const clickTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showShareModal, setShowShareModal] = useState(false); // 🔥 State för ShareModal
+  const [userEmail, setUserEmail] = useState(""); // 🔥 State för användarens email
+  const [isEditingBoardName, setIsEditingBoardName] = useState(false); // 🔥 State för namnbyte
+  const [newBoardName, setNewBoardName] = useState("");
+
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const [showMobileSearch, setShowMobileSearch] = useState(false);
+  // 🔥 NY: Responsivitet
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768); // 🔥 FIX: Initiera direkt för att slippa "flash" av desktop-UI
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
   // State för Radial Menu
   const [menuState, setMenuState] = useState<{
@@ -101,6 +130,8 @@ export default function Canvas() {
         return;
       }
 
+      setUserEmail(session.user.email || ""); // 🔥 Spara email för visning
+
       // 🔥 JOIN LOGIC: Kolla om vi har en invite-token i URL:en
       const params = new URLSearchParams(window.location.search);
       const inviteToken = params.get("token");
@@ -122,57 +153,126 @@ export default function Canvas() {
           alert(
             "✅ Du har gått med i boarden! Du kan nu se och redigera innehållet.",
           );
-          setBoardId(result.board_id);
+          // setBoardId(result.board_id); // Vänta med att sätta state tills vi hämtat datan nedan
+          localStorage.setItem("brainboard-active-board", result.board_id); // 🔥 Spara direkt vid join
           window.history.replaceState(
             {},
             document.title,
             window.location.pathname,
           );
-          return;
         }
       }
 
       // 🔥 NY: Board-logik - Hämta eller skapa board
-      let activeBoardId = boardId;
 
-      if (!activeBoardId) {
-        // 1. Kolla om användaren har några boards
-        const { data: boards } = await supabase
-          .from("boards")
-          .select("id")
-          .eq("user_id", session.user.id)
-          .order("created_at", { ascending: true }) // 🔥 FIX: Ta alltid den äldsta boarden först (stabiliserar reload)
-          .limit(1);
+      // 1. Hämta EGNA boards
+      const { data: ownedBoards } = await supabase
+        .from("boards")
+        .select("id, title, created_at")
+        .eq("user_id", session.user.id)
+        .order("created_at", { ascending: true });
 
-        if (boards && boards.length > 0) {
-          activeBoardId = boards[0].id;
-        } else {
-          // 2. Om inte, skapa en "General" board
-          const { data: newBoard, error: createError } = await supabase
-            .from("boards")
-            .insert({ user_id: session.user.id, title: "General" })
-            .select()
-            .single();
+      // 2. Hämta DELADE boards (via RPC för att få email)
+      const { data: sharedBoards, error: sharedError } = await supabase.rpc(
+        "get_shared_boards_details",
+      );
 
-          if (createError) {
-            console.error("Kunde inte skapa board (RLS-fel?):", createError);
-          }
+      if (sharedError)
+        console.error("Error fetching shared boards:", sharedError);
 
-          if (newBoard) activeBoardId = newBoard.id;
-        }
-        if (activeBoardId) setBoardId(activeBoardId);
+      // 🔥 FIX: Filtrera bort delade boards som jag faktiskt äger (om jag bjudit in mig själv)
+      const ownedIds = new Set(ownedBoards?.map((b) => b.id));
+      const uniqueSharedBoards = (sharedBoards || []).filter(
+        (s: any) => !ownedIds.has(s.board_id),
+      );
+
+      // 3. Slå ihop listorna
+      const allBoards: {
+        id: string;
+        title: string;
+        isOwner: boolean;
+        ownerEmail?: string;
+      }[] = [];
+
+      // 🔥 FIX: Enforce "One Board Per User" - Ta bara den första ägda boarden
+      if (ownedBoards && ownedBoards.length > 0) {
+        const primaryBoard = ownedBoards[0];
+        allBoards.push({
+          id: primaryBoard.id,
+          title: primaryBoard.title || "Namnlös Board",
+          isOwner: true,
+        });
       }
 
+      allBoards.push(
+        ...uniqueSharedBoards.map((s: any) => ({
+          id: s.board_id,
+          title: s.title || "Delad Board",
+          isOwner: false,
+          ownerEmail: s.owner_email, // 🔥 Nu har vi ägarens email!
+        })),
+      );
+
+      // 🔥 FIX: Om vi precis gick med i en board (via länk), se till att den finns i listan
+      // Detta löser problemet om RLS är långsamt eller om listan inte uppdaterats än
+      const justJoinedId = localStorage.getItem("brainboard-active-board");
+      if (justJoinedId && !allBoards.some((b) => b.id === justJoinedId)) {
+        // Om den saknas, tvinga in den temporärt så vi inte redirectas bort
+        // (Vi vet inte namnet än, men det laddas vid nästa refresh)
+        allBoards.push({
+          id: justJoinedId,
+          title: "Laddar...",
+          isOwner: false,
+        });
+      }
+
+      // 4. Om inga EGNA boards finns, skapa en General
+      if (!allBoards.some((b) => b.isOwner)) {
+        const { data: newBoard, error: createError } = await supabase
+          .from("boards")
+          .insert({ user_id: session.user.id, title: "General" })
+          .select()
+          .single();
+
+        if (createError) console.error("Kunde inte skapa board:", createError);
+
+        if (newBoard) {
+          // Lägg till den nya boarden först i listan
+          allBoards.unshift({
+            id: newBoard.id,
+            title: newBoard.title,
+            isOwner: true,
+          });
+        }
+      }
+
+      setAvailableBoards(allBoards);
+
+      // 5. Bestäm vilken board som ska visas (State -> LocalStorage -> Första i listan)
+      let activeBoardId =
+        boardId || localStorage.getItem("brainboard-active-board");
+
+      // Validera att sparad board faktiskt finns kvar i listan
+      if (activeBoardId && !allBoards.some((b) => b.id === activeBoardId)) {
+        activeBoardId = null;
+      }
+
+      // Fallback till första boarden
       if (!activeBoardId) {
-        console.error("Kunde inte hitta eller skapa en board.");
-        return;
+        if (allBoards.length > 0) activeBoardId = allBoards[0].id;
+      }
+
+      if (activeBoardId) {
+        setBoardId(activeBoardId);
+        localStorage.setItem("brainboard-active-board", activeBoardId);
+      } else {
+        return; // Inga boards att visa
       }
 
       // Hämta noder (Filtrera på board_id)
       const { data, error } = await supabase
         .from("nodes")
         .select("*")
-        .eq("user_id", session.user.id)
         .eq("board_id", activeBoardId); // 🔥 Filtrera på board
 
       if (error) {
@@ -208,7 +308,6 @@ export default function Canvas() {
       const { data: edgeData, error: edgeError } = await supabase
         .from("edges")
         .select("*")
-        .eq("user_id", session.user.id)
         .eq("board_id", activeBoardId); // 🔥 Filtrera på board
 
       if (edgeError) console.error("Error fetching edges:", edgeError);
@@ -229,7 +328,6 @@ export default function Canvas() {
       const { data: drawingData, error: drawingError } = await supabase
         .from("drawings")
         .select("*")
-        .eq("user_id", session.user.id)
         .eq("board_id", activeBoardId); // 🔥 Filtrera på board
 
       if (drawingError) console.error("Error fetching drawings:", drawingError);
@@ -257,7 +355,12 @@ export default function Canvas() {
       .channel("brainboard-sync")
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "nodes" },
+        {
+          event: "*",
+          schema: "public",
+          table: "nodes",
+          filter: `board_id=eq.${boardId}`,
+        }, // 🔥 Optimering: Lyssna bara på denna board
         (payload) => {
           // 🔥 Ignorera events från andra boards
           if (payload.new && (payload.new as any).board_id !== boardId) return;
@@ -506,6 +609,74 @@ export default function Canvas() {
       .delete()
       .eq("id", drawingId);
     if (error) console.error("Error deleting drawing:", error);
+  };
+
+  // 9. Byt namn på board
+  const updateBoardTitle = async () => {
+    if (!boardId || !newBoardName.trim()) return;
+
+    const { error } = await supabase
+      .from("boards")
+      .update({ title: newBoardName })
+      .eq("id", boardId);
+
+    if (error) {
+      console.error("Error updating board title:", error);
+      alert("Kunde inte byta namn (du kanske inte äger boarden?)");
+    } else {
+      setAvailableBoards((prev) =>
+        prev.map((b) => (b.id === boardId ? { ...b, title: newBoardName } : b)),
+      );
+      setIsEditingBoardName(false);
+    }
+  };
+
+  // 11. Lämna en delad board
+  const leaveBoard = async () => {
+    if (!boardId) return;
+    const boardToLeave = availableBoards.find((b) => b.id === boardId);
+
+    // Säkerhetskoll: Man kan inte lämna sin egen board (den måste raderas isf)
+    if (boardToLeave?.isOwner) return;
+
+    if (
+      !confirm(
+        `Är du säker på att du vill lämna boarden "${boardToLeave?.title}"? Du kommer inte längre ha åtkomst till den.`,
+      )
+    )
+      return;
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { error } = await supabase
+      .from("board_members")
+      .delete()
+      .eq("board_id", boardId)
+      .eq("user_id", user.id);
+
+    if (error) {
+      console.error("Error leaving board:", error);
+      alert("Kunde inte lämna boarden.");
+    } else {
+      // Uppdatera listan och byt till min egen board
+      const remaining = availableBoards.filter((b) => b.id !== boardId);
+      setAvailableBoards(remaining);
+      // Byt till första tillgängliga (vilket borde vara min egen board)
+      if (remaining.length > 0) {
+        setBoardId(remaining[0].id);
+        localStorage.setItem("brainboard-active-board", remaining[0].id);
+      } else {
+        window.location.reload();
+      }
+    }
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    window.location.reload();
   };
 
   /* =========================
@@ -1445,12 +1616,14 @@ export default function Canvas() {
         connectionMode={ConnectionMode.Loose}
         minZoom={0.1}
         maxZoom={4}
+        proOptions={{ hideAttribution: true }}
         // 🔥 RENSA ALLA LÅSNINGAR - Låt React Flow vara React Flow
         panOnDrag={true}
         zoomOnScroll={true}
         zoomOnPinch={true}
         zoomOnDoubleClick={false}
         panOnScroll={false} // VIKTIGT: False så att scroll zoomar istället för panorerar
+        selectionOnDrag={false} // 🔥 FIX: Gör att man kan panorera med ett finger på mobil utan att markera
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
@@ -1465,7 +1638,29 @@ export default function Canvas() {
           );
         }}
       >
-        <MiniMap />
+        <MiniMap
+          nodeColor={(n) => (n.data?.color as string) || "#f1f1f1"}
+          maskColor="rgba(0, 0, 0, 0.6)" // Mörkare mask för dark mode
+          style={
+            isMobile
+              ? {
+                  width: 100,
+                  height: 80,
+                  bottom: 10,
+                  right: 10,
+                  opacity: 0.9,
+                  backgroundColor: "#1e1e24",
+                  border: "1px solid #333",
+                }
+              : { backgroundColor: "#1e1e24", border: "1px solid #333" }
+          }
+          onClick={(_, position) => {
+            reactFlowInstance?.setCenter(position.x, position.y, {
+              zoom: 1,
+              duration: 500,
+            });
+          }}
+        />
 
         {/* Drawing Layer - Ligger inuti ReactFlow för att få tillgång till context */}
         <DrawingLayer
@@ -1489,135 +1684,347 @@ export default function Canvas() {
         />
 
         {/* Ge Controls högre z-index än DrawingLayer (1500) så knapparna går att klicka på */}
-        <Controls style={{ zIndex: 2000 }} />
+        {!isMobile && (
+          <Controls
+            style={{ zIndex: 2000, bottom: 15 }}
+            showInteractive={true}
+          />
+        )}
         <Background gap={20} size={1} color="#333" />
 
-        {/* Sök-input */}
-        <div
-          style={{
-            position: "absolute",
-            top: 10,
-            left: "50%",
-            transform: "translateX(-50%)",
-            zIndex: 1000,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-          }}
-        >
-          <div style={{ position: "relative" }}>
-            <input
-              ref={searchInputRef}
-              type="text"
-              placeholder="Sök"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  if (navigationMatches.length === 0) return;
-                  if (e.shiftKey) {
-                    // Föregående (cyklisk)
-                    setActiveMatchIndex((prev) =>
-                      prev === 0 ? navigationMatches.length - 1 : prev - 1,
-                    );
-                  } else {
-                    // Nästa (cyklisk)
-                    setActiveMatchIndex(
-                      (prev) => (prev + 1) % navigationMatches.length,
-                    );
-                  }
-                }
-              }}
-              style={{
-                padding: "8px 32px 8px 12px", // Extra padding höger för krysset
-                borderRadius: "8px",
-                border: "1px solid #555",
-                background: "#222",
-                color: "#fff",
-                outline: "none",
-                minWidth: "200px",
-              }}
-            />
-            {searchTerm && (
-              <button
-                onClick={() => {
-                  setSearchTerm("");
-                  searchInputRef.current?.focus();
-                }}
-                style={{
-                  position: "absolute",
-                  right: 8,
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  background: "transparent",
-                  border: "none",
-                  color: "#888",
-                  cursor: "pointer",
-                  fontSize: "14px",
-                  fontWeight: "bold",
-                }}
-              >
-                ✕
-              </button>
-            )}
-          </div>
-
-          {/* Träffräknare */}
-          {searchTerm && (
-            <div
-              style={{
-                marginTop: 4,
-                fontSize: "12px",
-                color: navigationMatches.length > 0 ? "#aaa" : "#ff6b6b",
-                background: "rgba(0,0,0,0.5)",
-                padding: "2px 8px",
-                borderRadius: "4px",
-              }}
-            >
-              {navigationMatches.length === 0
-                ? "Inga träffar"
-                : `${(activeMatchIndex % navigationMatches.length) + 1} / ${navigationMatches.length} träff${
-                    navigationMatches.length === 1 ? "" : "ar"
-                  }`}
-            </div>
-          )}
-        </div>
-
-        <div
-          style={{
-            position: "absolute",
-            top: 10,
-            right: 10,
-            display: "flex",
-            gap: 8,
-            zIndex: 1000,
-          }}
-        >
-          {/* 🔥 Share Button */}
-          <button
-            onClick={() => setShowShareModal(true)}
+        {/* 🔥 DESKTOP: Board Switcher (Top Left) */}
+        {!isMobile && (
+          <div
             style={{
-              background: "#6366f1",
-              border: "none",
-              borderRadius: "8px",
-              padding: "8px 12px",
-              color: "white",
-              cursor: "pointer",
+              position: "absolute",
+              top: 10,
+              left: 10,
+              zIndex: 1000,
               display: "flex",
-              alignItems: "center",
-              gap: "6px",
-              fontWeight: 600,
-              fontSize: "14px",
+              flexDirection: "column",
+              gap: 4,
             }}
           >
-            <Share2 size={16} />
-            Dela
-          </button>
+            {isEditingBoardName ? (
+              <div style={{ display: "flex", gap: 4 }}>
+                <input
+                  value={newBoardName}
+                  onChange={(e) => setNewBoardName(e.target.value)}
+                  style={{
+                    background: "#222",
+                    color: "white",
+                    border: "1px solid #6366f1",
+                    padding: "8px",
+                    borderRadius: "8px",
+                    outline: "none",
+                    fontSize: "14px",
+                    width: "140px",
+                  }}
+                  autoFocus
+                />
+                <button
+                  onClick={updateBoardTitle}
+                  style={{
+                    background: "#10b981",
+                    border: "none",
+                    borderRadius: 4,
+                    cursor: "pointer",
+                    color: "white",
+                    padding: "0 6px",
+                  }}
+                >
+                  <Check size={16} />
+                </button>
+                <button
+                  onClick={() => setIsEditingBoardName(false)}
+                  style={{
+                    background: "#ef4444",
+                    border: "none",
+                    borderRadius: 4,
+                    cursor: "pointer",
+                    color: "white",
+                    padding: "0 6px",
+                  }}
+                >
+                  <XIcon size={16} />
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <select
+                  value={boardId || ""}
+                  onChange={(e) => {
+                    const newId = e.target.value;
+                    setBoardId(newId);
+                    localStorage.setItem("brainboard-active-board", newId); // Spara val
+                  }}
+                  style={{
+                    background: "#222",
+                    color: "white",
+                    border: "1px solid #444",
+                    padding: "8px 12px",
+                    borderRadius: "8px",
+                    outline: "none",
+                    cursor: "pointer",
+                    fontWeight: 600,
+                    fontSize: "14px",
+                    boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
+                    minWidth: "160px",
+                  }}
+                >
+                  {/* Grupp 1: Min Board (Utan rubrik/optgroup nu) */}
+                  {availableBoards
+                    .filter((b) => b.isOwner)
+                    .map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.title}
+                      </option>
+                    ))}
 
-          <button onClick={undo}>↶</button>
-          <button onClick={redo}>↷</button>
-        </div>
+                  {/* Grupp 2: Delade Boards */}
+                  <optgroup label="Delade med mig">
+                    {availableBoards.filter((b) => !b.isOwner).length === 0 ? (
+                      <option disabled>Inga delade boards</option>
+                    ) : (
+                      availableBoards
+                        .filter((b) => !b.isOwner)
+                        .map((b) => (
+                          <option key={b.id} value={b.id}>
+                            {b.title}{" "}
+                            {b.ownerEmail ? `(av ${b.ownerEmail})` : ""}
+                          </option>
+                        ))
+                    )}
+                  </optgroup>
+                </select>
+
+                {/* Visa bara redigera-knapp om man äger boarden */}
+                {availableBoards.find((b) => b.id === boardId)?.isOwner && (
+                  <button
+                    onClick={() => {
+                      const currentBoard = availableBoards.find(
+                        (b) => b.id === boardId,
+                      );
+                      setNewBoardName(currentBoard?.title || "");
+                      setIsEditingBoardName(true);
+                    }}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      cursor: "pointer",
+                      color: "#666",
+                      padding: 4,
+                    }}
+                    title="Byt namn"
+                  >
+                    <Pencil size={14} />
+                  </button>
+                )}
+
+                {/* Visa Lämna-knapp om man INTE äger boarden */}
+                {availableBoards.find((b) => b.id === boardId) &&
+                  !availableBoards.find((b) => b.id === boardId)?.isOwner && (
+                    <button
+                      onClick={leaveBoard}
+                      style={{
+                        background: "transparent",
+                        border: "none",
+                        cursor: "pointer",
+                        color: "#ef4444", // Röd färg för att indikera "fara"/lämna
+                        padding: 4,
+                      }}
+                      title="Lämna board"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 🔥 DESKTOP: Sök-input */}
+        {!isMobile && (
+          <div
+            style={{
+              position: "absolute",
+              top: 10,
+              left: "50%",
+              transform: "translateX(-50%)",
+              zIndex: 1000,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+            }}
+          >
+            <div style={{ position: "relative" }}>
+              <input
+                ref={searchInputRef}
+                type="text"
+                placeholder="Sök"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    if (navigationMatches.length === 0) return;
+                    if (e.shiftKey) {
+                      // Föregående (cyklisk)
+                      setActiveMatchIndex((prev) =>
+                        prev === 0 ? navigationMatches.length - 1 : prev - 1,
+                      );
+                    } else {
+                      // Nästa (cyklisk)
+                      setActiveMatchIndex(
+                        (prev) => (prev + 1) % navigationMatches.length,
+                      );
+                    }
+                  }
+                }}
+                style={{
+                  padding: "8px 32px 8px 12px", // Extra padding höger för krysset
+                  borderRadius: "8px",
+                  border: "1px solid #555",
+                  background: "#222",
+                  color: "#fff",
+                  outline: "none",
+                }}
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => {
+                    setSearchTerm("");
+                    searchInputRef.current?.focus();
+                  }}
+                  style={{
+                    position: "absolute",
+                    right: 8,
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    background: "transparent",
+                    border: "none",
+                    color: "#888",
+                    cursor: "pointer",
+                    fontSize: "14px",
+                    fontWeight: "bold",
+                  }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            {/* Träffräknare */}
+            {searchTerm && (
+              <div
+                style={{
+                  marginTop: 4,
+                  fontSize: "12px",
+                  color: navigationMatches.length > 0 ? "#aaa" : "#ff6b6b",
+                  background: "rgba(0,0,0,0.5)",
+                  padding: "2px 8px",
+                  borderRadius: "4px",
+                }}
+              >
+                {navigationMatches.length === 0
+                  ? "Inga träffar"
+                  : `${(activeMatchIndex % navigationMatches.length) + 1} / ${navigationMatches.length} träff${
+                      navigationMatches.length === 1 ? "" : "ar"
+                    }`}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 🔥 DESKTOP: Top Right Buttons */}
+        {!isMobile && (
+          <div
+            style={{
+              position: "absolute",
+              top: 10,
+              right: 10,
+              display: "flex",
+              gap: 8,
+              zIndex: 1000,
+            }}
+          >
+            {/* 🔥 Share Button */}
+            <button
+              onClick={() => setShowShareModal(true)}
+              style={{
+                background: "#6366f1",
+                border: "none",
+                borderRadius: "8px",
+                padding: "8px 12px",
+                color: "white",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                fontWeight: 600,
+                fontSize: "14px",
+              }}
+            >
+              <Share2 size={16} />
+              Dela
+            </button>
+
+            <button
+              onClick={undo}
+              disabled={historyIndex === 0}
+              style={{
+                background: "#222",
+                border: "1px solid #444",
+                borderRadius: "8px",
+                padding: "8px",
+                color: historyIndex > 0 ? "white" : "#555",
+                cursor: historyIndex > 0 ? "pointer" : "default",
+                display: "flex",
+                alignItems: "center",
+                opacity: historyIndex > 0 ? 1 : 0.5,
+              }}
+              title="Ångra"
+            >
+              <RotateCcw size={16} />
+            </button>
+            <button
+              onClick={redo}
+              disabled={historyIndex >= history.length - 1}
+              style={{
+                background: "#222",
+                border: "1px solid #444",
+                borderRadius: "8px",
+                padding: "8px",
+                color: historyIndex < history.length - 1 ? "white" : "#555",
+                cursor:
+                  historyIndex < history.length - 1 ? "pointer" : "default",
+                display: "flex",
+                alignItems: "center",
+                opacity: historyIndex < history.length - 1 ? 1 : 0.5,
+              }}
+              title="Gör om"
+            >
+              <RotateCw size={16} />
+            </button>
+
+            <button
+              onClick={handleLogout}
+              style={{
+                background: "rgba(239, 68, 68, 0.1)",
+                border: "1px solid rgba(239, 68, 68, 0.2)",
+                borderRadius: "8px",
+                padding: "8px",
+                color: "#ef4444",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+              }}
+              title="Logga ut"
+            >
+              <LogOut size={16} />
+            </button>
+          </div>
+        )}
 
         {/* Indikator för Draw Mode */}
         {isDrawingMode && (
@@ -1627,6 +2034,7 @@ export default function Canvas() {
               setSelectedDrawingId(null);
               setIsDrawing(false);
             }}
+            style={{ top: 60 }}
           />
         )}
       </ReactFlow>
@@ -1655,6 +2063,353 @@ export default function Canvas() {
           boardId={boardId}
           onClose={() => setShowShareModal(false)}
         />
+      )}
+
+      {/* 🔥 DESKTOP: "Inloggad som" indikator */}
+      {!isMobile && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: 10,
+            left: 80,
+            color: "rgba(255, 255, 255, 0.3)",
+            fontSize: "12px",
+            pointerEvents: "none",
+            userSelect: "none",
+            zIndex: 1000,
+          }}
+        >
+          Du är inloggad som: {userEmail}
+        </div>
+      )}
+
+      {/* 🔥 MOBILE UI OVERLAY */}
+      {isMobile && (
+        <>
+          {/* 1. Mobile Top Bar */}
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              height: 50,
+              background: "#1e1e24",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "0 16px",
+              zIndex: 2000,
+              borderBottom: "1px solid #333",
+              boxShadow: "0 2px 10px rgba(0,0,0,0.2)",
+            }}
+          >
+            <button
+              onClick={() => setShowMobileMenu(true)}
+              style={{
+                background: "none",
+                border: "none",
+                color: "white",
+                padding: 4,
+              }}
+            >
+              <Menu size={24} />
+            </button>
+
+            {showMobileSearch ? (
+              <input
+                autoFocus
+                placeholder="Sök..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                style={{
+                  flex: 1,
+                  margin: "0 16px",
+                  background: "#333",
+                  border: "none",
+                  color: "white",
+                  padding: "6px 12px",
+                  borderRadius: 6,
+                  fontSize: 16,
+                  outline: "none",
+                }}
+              />
+            ) : (
+              <span
+                style={{
+                  fontWeight: 600,
+                  color: "white",
+                  fontSize: 16,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  maxWidth: "60%",
+                }}
+              >
+                {availableBoards.find((b) => b.id === boardId)?.title ||
+                  "BrainBoard"}
+              </span>
+            )}
+
+            <button
+              onClick={() => setShowMobileSearch(!showMobileSearch)}
+              style={{
+                background: "none",
+                border: "none",
+                color: "white",
+                padding: 4,
+              }}
+            >
+              {showMobileSearch ? <XIcon size={24} /> : <Search size={24} />}
+            </button>
+          </div>
+
+          {/* 2. Mobile Menu Drawer */}
+          {showMobileMenu && (
+            <>
+              <div
+                onClick={() => setShowMobileMenu(false)}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  height: "100%",
+                  background: "rgba(0,0,0,0.5)",
+                  zIndex: 2999,
+                }}
+              />
+              <div
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "85%",
+                  maxWidth: "300px",
+                  height: "100%",
+                  background: "#1e1e24",
+                  zIndex: 3000,
+                  padding: 20,
+                  boxShadow: "2px 0 20px rgba(0,0,0,0.5)",
+                  display: "flex",
+                  flexDirection: "column",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    marginBottom: 30,
+                  }}
+                >
+                  <h2
+                    style={{
+                      margin: 0,
+                      fontSize: 20,
+                      color: "white",
+                      fontWeight: 700,
+                    }}
+                  >
+                    Meny
+                  </h2>
+                  <button
+                    onClick={() => setShowMobileMenu(false)}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "#888",
+                    }}
+                  >
+                    <XIcon size={24} />
+                  </button>
+                </div>
+
+                {/* User Info */}
+                <div
+                  style={{
+                    marginBottom: 24,
+                    paddingBottom: 20,
+                    borderBottom: "1px solid #333",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: "50%",
+                      background: "#333",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <User size={20} color="#ccc" />
+                  </div>
+                  <div style={{ overflow: "hidden" }}>
+                    <div style={{ fontSize: 12, color: "#888" }}>
+                      Inloggad som
+                    </div>
+                    <div
+                      style={{
+                        color: "white",
+                        fontWeight: 500,
+                        fontSize: 14,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {userEmail}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Board Switcher */}
+                <div style={{ marginBottom: 24 }}>
+                  <label
+                    style={{
+                      fontSize: 12,
+                      color: "#888",
+                      display: "block",
+                      marginBottom: 8,
+                      fontWeight: 600,
+                    }}
+                  >
+                    DINA BOARDS
+                  </label>
+                  <select
+                    value={boardId || ""}
+                    onChange={(e) => {
+                      setBoardId(e.target.value);
+                      localStorage.setItem(
+                        "brainboard-active-board",
+                        e.target.value,
+                      );
+                      setShowMobileMenu(false);
+                    }}
+                    style={{
+                      width: "100%",
+                      padding: 12,
+                      background: "#2a2a30",
+                      color: "white",
+                      border: "1px solid #444",
+                      borderRadius: 8,
+                      fontSize: 16,
+                      outline: "none",
+                    }}
+                  >
+                    {availableBoards.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.title} {b.isOwner ? "" : "(Delad)"}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Actions */}
+                <div
+                  style={{ display: "flex", flexDirection: "column", gap: 12 }}
+                >
+                  <button
+                    onClick={() => {
+                      setShowShareModal(true);
+                      setShowMobileMenu(false);
+                    }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      padding: 12,
+                      background: "#333",
+                      border: "none",
+                      borderRadius: 8,
+                      color: "white",
+                      fontSize: 16,
+                    }}
+                  >
+                    <Share2 size={18} /> Dela Board
+                  </button>
+                  <button
+                    onClick={handleLogout}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      padding: 12,
+                      background: "rgba(239, 68, 68, 0.1)",
+                      border: "1px solid rgba(239, 68, 68, 0.2)",
+                      borderRadius: 8,
+                      color: "#ef4444",
+                      fontSize: 16,
+                      marginTop: "auto",
+                    }}
+                  >
+                    <LogOut size={18} /> Logga ut
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* 3. Mobile FABs (Undo/Redo) */}
+          <div
+            style={{
+              position: "absolute",
+              bottom: 110, // Flyttad upp för att inte krocka med MiniMap
+              right: 20,
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+              zIndex: 2000,
+            }}
+          >
+            <button
+              onClick={undo}
+              disabled={historyIndex === 0}
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: "50%",
+                background: "#222",
+                color: historyIndex > 0 ? "white" : "#555",
+                border: "1px solid #444",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                boxShadow:
+                  historyIndex > 0 ? "0 4px 12px rgba(0,0,0,0.4)" : "none",
+                opacity: historyIndex > 0 ? 1 : 0.5,
+              }}
+            >
+              <RotateCcw size={20} />
+            </button>
+            <button
+              onClick={redo}
+              disabled={historyIndex >= history.length - 1}
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: "50%",
+                background: "#222",
+                color: historyIndex < history.length - 1 ? "white" : "#555",
+                border: "1px solid #444",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                boxShadow:
+                  historyIndex < history.length - 1
+                    ? "0 4px 12px rgba(0,0,0,0.4)"
+                    : "none",
+                opacity: historyIndex < history.length - 1 ? 1 : 0.5,
+              }}
+            >
+              <RotateCw size={20} />
+            </button>
+          </div>
+        </>
       )}
     </div>
   );

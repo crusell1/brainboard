@@ -38,9 +38,6 @@ function App() {
 
   return (
     <>
-      <div style={{ position: "absolute", top: 60, right: 10, zIndex: 10 }}>
-        <button onClick={() => supabase.auth.signOut()}>Logga ut</button>
-      </div>
       <div
         style={{
           width: "100vw",
