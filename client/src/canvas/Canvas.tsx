@@ -108,51 +108,25 @@ export default function Canvas() {
       if (inviteToken) {
         console.log("🔍 Hittade invite-token, försöker gå med i board...");
 
-        // 1. Hämta inbjudan
-        const { data: invite, error: inviteError } = await supabase
-          .from("board_invites")
-          .select("*")
-          .eq("token", inviteToken)
-          .single();
+        // 🔥 FIX: Använd RPC för att gå med säkert (kringgår RLS)
+        const { data: result, error } = await supabase.rpc("join_board", {
+          invite_token: inviteToken,
+        });
 
-        if (inviteError || !invite) {
-          alert("Ogiltig eller utgången länk.");
-        } else {
-          // 2. Kolla om den gått ut
-          const now = new Date();
-          const expiresAt = invite.expires_at
-            ? new Date(invite.expires_at)
-            : null;
-
-          if (expiresAt && now > expiresAt) {
-            alert("Den här länken har gått ut.");
-          } else {
-            // 3. Lägg till användaren i board_members
-            const { error: joinError } = await supabase
-              .from("board_members")
-              .insert({
-                board_id: invite.board_id,
-                user_id: session.user.id,
-                role: invite.role || "viewer",
-              });
-
-            if (joinError && joinError.code !== "23505") {
-              // 23505 = unique violation (redan medlem)
-              console.error("Kunde inte gå med i board:", joinError);
-              alert("Ett fel uppstod när du försökte gå med.");
-            } else {
-              console.log("✅ Gick med i board (eller var redan medlem)!");
-              // Sätt aktiv board till den vi just gick med i
-              setBoardId(invite.board_id);
-              // Rensa URL:en snyggt
-              window.history.replaceState(
-                {},
-                document.title,
-                window.location.pathname,
-              );
-              return; // Avbryt resten av initieringen för att ladda den nya boarden via useEffect-dependecy
-            }
-          }
+        if (error) {
+          console.error("RPC Error:", error);
+          alert("Ett fel uppstod: " + error.message);
+        } else if (result && result.error) {
+          alert(result.error);
+        } else if (result && result.success) {
+          console.log("✅ Gick med i board!");
+          setBoardId(result.board_id);
+          window.history.replaceState(
+            {},
+            document.title,
+            window.location.pathname,
+          );
+          return;
         }
       }
 
