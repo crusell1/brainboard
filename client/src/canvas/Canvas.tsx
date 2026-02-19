@@ -119,7 +119,9 @@ export default function Canvas() {
         } else if (result && result.error) {
           alert(result.error);
         } else if (result && result.success) {
-          console.log("✅ Gick med i board!");
+          alert(
+            "✅ Du har gått med i boarden! Du kan nu se och redigera innehållet.",
+          );
           setBoardId(result.board_id);
           window.history.replaceState(
             {},
