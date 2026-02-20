@@ -25,6 +25,7 @@ import type { Drawing, Point } from "../types/drawing";
 import DrawModeControls from "../components/DrawModeControls";
 import ImageUrlModal from "../components/ImageUrlModal"; // 🔥 Importera ImageUrlModal
 import ShareModal from "../components/ShareModal"; // 🔥 Importera ShareModal
+import ConfirmModal from "../components/ConfirmModal"; // 🔥 Importera ConfirmModal
 import {
   Share2,
   Pencil,
@@ -90,6 +91,7 @@ export default function Canvas() {
   const clickTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showShareModal, setShowShareModal] = useState(false); // 🔥 State för ShareModal
   const [showUrlModal, setShowUrlModal] = useState(false); // 🔥 State för ImageUrlModal
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false); // 🔥 State för ConfirmModal
   const [userEmail, setUserEmail] = useState(""); // 🔥 State för användarens email
   const [isEditingBoardName, setIsEditingBoardName] = useState(false); // 🔥 State för namnbyte
   const [newBoardName, setNewBoardName] = useState("");
@@ -913,19 +915,11 @@ export default function Canvas() {
   };
 
   // 11. Lämna en delad board
-  const leaveBoard = async () => {
+  const handleLeaveBoard = async () => {
     if (!boardId) return;
-    const boardToLeave = availableBoards.find((b) => b.id === boardId);
 
-    // Säkerhetskoll: Man kan inte lämna sin egen board (den måste raderas isf)
-    if (boardToLeave?.isOwner) return;
-
-    if (
-      !confirm(
-        `Är du säker på att du vill lämna boarden "${boardToLeave?.title}"? Du kommer inte längre ha åtkomst till den.`,
-      )
-    )
-      return;
+    // Stäng modalen först
+    setShowLeaveConfirm(false);
 
     const {
       data: { user },
@@ -2294,7 +2288,7 @@ export default function Canvas() {
                 {availableBoards.find((b) => b.id === boardId) &&
                   !availableBoards.find((b) => b.id === boardId)?.isOwner && (
                     <button
-                      onClick={leaveBoard}
+                      onClick={() => setShowLeaveConfirm(true)}
                       style={{
                         background: "transparent",
                         border: "none",
@@ -2533,6 +2527,17 @@ export default function Canvas() {
           onClose={() => setShowShareModal(false)}
         />
       )}
+
+      {/* 🔥 Confirm Modal (Lämna board) */}
+      <ConfirmModal
+        isOpen={showLeaveConfirm}
+        onClose={() => setShowLeaveConfirm(false)}
+        onConfirm={handleLeaveBoard}
+        title="Lämna board?"
+        message={`Är du säker på att du vill lämna "${availableBoards.find((b) => b.id === boardId)?.title}"? Du kommer inte längre ha åtkomst till den.`}
+        confirmText="Lämna"
+        isDanger={true}
+      />
 
       {/* 🔥 Image URL Modal */}
       {showUrlModal && (

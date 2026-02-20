@@ -131,6 +131,7 @@ export default function NoteNode({
   const updateNodeInternals = useUpdateNodeInternals();
   const [value, setValue] = useState(data.label ?? "");
   const [title, setTitle] = useState(data.title ?? "");
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null); // 🔥 NY: Wrapper för att mäta innehåll säkert
@@ -480,10 +481,11 @@ export default function NoteNode({
           checkSize(); // 🔥 Säkerställ att vi inte lämnar noden i ett ogiltigt läge
         }}
         handleStyle={{
-          width: 8,
-          height: 8,
+          width: 40, // 🔥 Öka touch-ytan rejält för mobil
+          height: 40,
           background: "transparent",
           border: "none",
+          touchAction: "none", // 🔥 Viktigt för att förhindra scroll/pan vid resize
         }}
         lineStyle={{
           border: "none",
@@ -500,23 +502,54 @@ export default function NoteNode({
           flexShrink: 0, // Förhindra att titeln krymper
         }}
       >
-        <input
-          className="nodrag"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          onBlur={() => data.onTitleChange?.(id, title)}
-          placeholder="Rubrik..."
-          style={{
-            width: "100%",
-            background: "transparent",
-            border: "none",
-            outline: "none",
-            fontSize: 16,
-            fontWeight: "bold",
-            color: "#111",
-            textAlign: "center",
-          }}
-        />
+        {isEditingTitle ? (
+          <input
+            className="nodrag"
+            autoFocus
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onBlur={() => {
+              data.onTitleChange?.(id, title);
+              setIsEditingTitle(false);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                data.onTitleChange?.(id, title);
+                setIsEditingTitle(false);
+              }
+            }}
+            placeholder="Rubrik..."
+            style={{
+              width: "100%",
+              background: "transparent",
+              border: "none",
+              outline: "none",
+              fontSize: 16,
+              fontWeight: "bold",
+              color: "#111",
+              textAlign: "center",
+            }}
+          />
+        ) : (
+          <div
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsEditingTitle(true);
+            }}
+            style={{
+              width: "100%",
+              fontSize: 16,
+              fontWeight: "bold",
+              color: title ? "#111" : "#888",
+              textAlign: "center",
+              cursor: "text",
+              minHeight: "24px",
+              // Ingen 'nodrag' här, så det går att dra i rubriken!
+            }}
+          >
+            {title || "Rubrik..."}
+          </div>
+        )}
       </div>
 
       {/* Färgpalett (visas när vald) */}
@@ -793,6 +826,25 @@ export default function NoteNode({
         >
           <X size={14} />
         </div>
+      )}
+
+      {/* 🔥 Visual Resize Handle (Bottom Right) - Visar var man ska dra */}
+      {selected && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: 5,
+            right: 5,
+            width: 16,
+            height: 16,
+            borderRight: "3px solid #6366f1",
+            borderBottom: "3px solid #6366f1",
+            borderBottomRightRadius: 4,
+            pointerEvents: "none", // Klick går igenom till den osynliga NodeResizer-handtaget
+            zIndex: 20,
+            opacity: 0.8,
+          }}
+        />
       )}
 
       <SmartHandle

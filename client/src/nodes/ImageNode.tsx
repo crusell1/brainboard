@@ -74,7 +74,7 @@ export default function ImageNode({
       style={{
         position: "relative",
         width: "100%",
-        height: "auto", // Låt innehållet styra höjden
+        height: "auto", // Låt innehållet styra höjden igen
         borderRadius: 12,
         border: selected ? "2px solid #6366f1" : "2px solid transparent",
         boxShadow: selected ? "0 0 15px rgba(99, 102, 241, 0.4)" : "none",
@@ -86,7 +86,6 @@ export default function ImageNode({
       }}
     >
       <NodeResizer
-        color="#6366f1"
         isVisible={selected}
         minWidth={100}
         minHeight={100}
@@ -97,7 +96,37 @@ export default function ImageNode({
         onResizeEnd={(_e, params) => {
           data.onResizeEnd?.(id, params.width, params.height);
         }}
+        handleStyle={{
+          width: 40, // 🔥 Öka touch-ytan rejält för mobil
+          height: 40,
+          background: "transparent",
+          border: "none",
+          touchAction: "none", // 🔥 Viktigt för att förhindra scroll/pan vid resize
+        }}
+        lineStyle={{
+          border: "none",
+        }}
       />
+
+      {/* 🔥 Visual Resize Handle (Bottom Right) - Visar var man ska dra */}
+      {selected && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: 5,
+            right: 5,
+            width: 16,
+            height: 16,
+            borderRight: "3px solid #6366f1",
+            borderBottom: "3px solid #6366f1",
+            borderBottomRightRadius: 4,
+            pointerEvents: "none", // Klick går igenom till den osynliga NodeResizer-handtaget
+            zIndex: 20,
+            opacity: 0.8,
+          }}
+        />
+      )}
+
       <SmartHandle
         id="top"
         type="source"
@@ -155,12 +184,13 @@ export default function ImageNode({
         }}
       />
 
+      {/* Bilden med transform */}
       <img
         src={data.src}
         alt="Image Node"
         style={{
           width: "100%",
-          height: "auto",
+          height: "auto", // Basera på bredd, men transform sköter resten
           borderRadius: 12,
           display: "block",
           pointerEvents: "none",

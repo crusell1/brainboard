@@ -1,4 +1,9 @@
-import { useEditor, EditorContent } from "@tiptap/react";
+import {
+  useEditor,
+  EditorContent,
+  NodeViewWrapper,
+  ReactNodeViewRenderer,
+} from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import LinkExtension from "@tiptap/extension-link";
@@ -15,9 +20,15 @@ import {
   Link as LinkIcon,
   Unlink,
   Image as ImageIcon,
+  Upload,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  X,
 } from "lucide-react";
-import { useEffect, useRef, useMemo } from "react";
+import { useEffect, useRef, useMemo, useState } from "react";
 import useSpeechRecognition from "../hooks/useSpeechRecognition";
+import ImageUrlModal from "./ImageUrlModal";
 
 type RichTextEditorProps = {
   content: string;
@@ -34,12 +45,16 @@ const MenuBar = ({
   onToggleVoice,
   onImageUpload,
   hasVoiceSupport,
+  onLinkClick,
+  onImageUrlClick,
 }: {
   editor: any;
   isListening: boolean;
   onToggleVoice: () => void;
   onImageUpload?: (file: File) => Promise<string | null>;
   hasVoiceSupport: boolean;
+  onLinkClick: () => void;
+  onImageUrlClick: () => void;
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -133,21 +148,7 @@ const MenuBar = ({
       <div style={{ width: 1, background: "#444", margin: "0 4px" }} />
 
       <button
-        onClick={() => {
-          const previousUrl = editor.getAttributes("link").href;
-          const url = window.prompt("URL", previousUrl);
-          if (url === null) return;
-          if (url === "") {
-            editor.chain().focus().extendMarkRange("link").unsetLink().run();
-            return;
-          }
-          editor
-            .chain()
-            .focus()
-            .extendMarkRange("link")
-            .setLink({ href: url })
-            .run();
-        }}
+        onClick={onLinkClick}
         style={buttonStyle(editor.isActive("link"))}
         title="Länk"
       >
@@ -166,15 +167,25 @@ const MenuBar = ({
         <Unlink size={14} />
       </button>
 
+      <div style={{ width: 1, background: "#444", margin: "0 4px" }} />
+
+      {/* Knapp för bild via URL */}
+      <button
+        onClick={onImageUrlClick}
+        style={buttonStyle(false)}
+        title="Infoga bild från URL"
+      >
+        <ImageIcon size={14} />
+      </button>
+
       {onImageUpload && (
         <>
-          <div style={{ width: 1, background: "#444", margin: "0 4px" }} />
           <button
             onClick={() => fileInputRef.current?.click()}
             style={buttonStyle(false)}
-            title="Infoga bild"
+            title="Ladda upp bild"
           >
-            <ImageIcon size={14} />
+            <Upload size={14} />
           </button>
           <input
             type="file"
@@ -210,6 +221,192 @@ const MenuBar = ({
   );
 };
 
+// 🔥 NY: Custom Node View för bilder (hanterar resize och alignment)
+const ImageNodeView = ({
+  node,
+  updateAttributes,
+  deleteNode,
+  selected,
+  editor,
+}: any) => {
+  // Visa bara selection om noden är vald OCH editorn är redigerbar
+  const isSelected = selected && editor.isEditable;
+
+  // Hantera storleksändring (drag)
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    // Hämta nuvarande bredd (ta bort 'px' om det finns)
+    const startWidth = parseInt(node.attrs.width || "300", 10);
+
+    const onMouseMove = (e: MouseEvent) => {
+      const currentX = e.clientX;
+      const diffInPx = currentX - startX;
+      const newWidth = Math.max(50, startWidth + diffInPx); // Minst 50px
+      updateAttributes({ width: `${newWidth}px` });
+    };
+
+    const onMouseUp = () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  };
+
+  // Justering
+  const align = node.attrs.align || "center";
+  let justifyContent = "center";
+  if (align === "left") justifyContent = "flex-start";
+  if (align === "right") justifyContent = "flex-end";
+
+  return (
+    <NodeViewWrapper
+      style={{
+        display: "flex",
+        justifyContent,
+        position: "relative",
+        margin: "12px 0",
+      }}
+    >
+      <div style={{ position: "relative", display: "inline-block" }}>
+        <img
+          src={node.attrs.src}
+          alt={node.attrs.alt}
+          style={{
+            width: node.attrs.width,
+            maxWidth: "100%",
+            borderRadius: "8px",
+            border: isSelected ? "2px solid #6366f1" : "2px solid transparent",
+            display: "block",
+          }}
+        />
+
+        {/* Kontroller som visas när bilden är vald */}
+        {isSelected && (
+          <>
+            {/* Justeringsknappar */}
+            <div
+              style={{
+                position: "absolute",
+                top: -40,
+                left: "50%",
+                transform: "translateX(-50%)",
+                background: "#222",
+                padding: "4px",
+                borderRadius: "6px",
+                display: "flex",
+                gap: "4px",
+                boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+                zIndex: 10,
+              }}
+            >
+              <button
+                onClick={() => updateAttributes({ align: "left" })}
+                style={{
+                  background: align === "left" ? "#6366f1" : "transparent",
+                  border: "none",
+                  color: "white",
+                  borderRadius: 4,
+                  padding: 4,
+                  cursor: "pointer",
+                }}
+              >
+                <AlignLeft size={14} />
+              </button>
+              <button
+                onClick={() => updateAttributes({ align: "center" })}
+                style={{
+                  background: align === "center" ? "#6366f1" : "transparent",
+                  border: "none",
+                  color: "white",
+                  borderRadius: 4,
+                  padding: 4,
+                  cursor: "pointer",
+                }}
+              >
+                <AlignCenter size={14} />
+              </button>
+              <button
+                onClick={() => updateAttributes({ align: "right" })}
+                style={{
+                  background: align === "right" ? "#6366f1" : "transparent",
+                  border: "none",
+                  color: "white",
+                  borderRadius: 4,
+                  padding: 4,
+                  cursor: "pointer",
+                }}
+              >
+                <AlignRight size={14} />
+              </button>
+            </div>
+
+            {/* Ta bort-knapp (litet kryss) */}
+            <button
+              onClick={() => deleteNode()}
+              onMouseDown={(e) => e.preventDefault()}
+              style={{
+                position: "absolute",
+                top: -8,
+                right: -8,
+                background: "#ef4444",
+                color: "white",
+                border: "2px solid white",
+                borderRadius: "50%",
+                width: "20px",
+                height: "20px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                zIndex: 20,
+                boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
+                padding: 0,
+              }}
+              title="Ta bort bild"
+            >
+              <X size={12} strokeWidth={3} />
+            </button>
+
+            {/* Resize Handle (Drag i höger kant) */}
+            <div
+              onMouseDown={handleMouseDown}
+              style={{
+                position: "absolute",
+                right: -6,
+                bottom: "50%",
+                width: "12px",
+                height: "24px",
+                background: "#6366f1",
+                borderRadius: "4px",
+                cursor: "ew-resize",
+                zIndex: 10,
+                border: "1px solid white",
+              }}
+            />
+          </>
+        )}
+      </div>
+    </NodeViewWrapper>
+  );
+};
+
+// 🔥 NY: Custom Image Extension som använder vår Node View
+const CustomImage = ImageExtension.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      width: { default: "300px" }, // 🔥 Standardbredd: 300px (ganska liten)
+      align: { default: "center" },
+    };
+  },
+  addNodeView() {
+    return ReactNodeViewRenderer(ImageNodeView);
+  },
+});
+
 export default function RichTextEditor({
   content,
   isEditing,
@@ -226,6 +423,8 @@ export default function RichTextEditor({
     resetTranscript,
     hasSupport,
   } = useSpeechRecognition();
+
+  const [modalType, setModalType] = useState<"link" | "image" | null>(null);
 
   // 🔥 FIX: Använd useMemo för extensions för att undvika "Duplicate extension" varningar
   const extensions = useMemo(
@@ -244,8 +443,8 @@ export default function RichTextEditor({
           rel: "noopener noreferrer",
         },
       }),
-      ImageExtension.configure({
-        inline: false,
+      CustomImage.configure({
+        inline: false, // Tvinga block-nivå för att alignment ska funka bra
       }),
     ],
     [],
@@ -319,6 +518,11 @@ export default function RichTextEditor({
     if (editor) {
       editor.setEditable(isEditing);
 
+      if (!isEditing) {
+        // Rensa selection när vi lämnar edit-läget så inte bilder fortsätter vara valda
+        editor.commands.setTextSelection(0);
+      }
+
       // Uppdatera klasser dynamiskt: Lägg till 'nodrag' endast i edit-mode
       editor.setOptions({
         editorProps: {
@@ -356,6 +560,8 @@ export default function RichTextEditor({
           onToggleVoice={isListening ? stopListening : startListening}
           onImageUpload={onImageUpload}
           hasVoiceSupport={hasSupport}
+          onLinkClick={() => setModalType("link")}
+          onImageUrlClick={() => setModalType("image")}
         />
       )}
       <EditorContent
@@ -369,6 +575,43 @@ export default function RichTextEditor({
         }}
         className="tiptap-container"
       />
+
+      {/* Modaler */}
+      {modalType === "link" && (
+        <ImageUrlModal
+          title="Infoga länk"
+          placeholder="https://..."
+          onConfirm={(url) => {
+            if (url) {
+              editor
+                ?.chain()
+                .focus()
+                .extendMarkRange("link")
+                .setLink({ href: url })
+                .run();
+            } else {
+              editor?.chain().focus().extendMarkRange("link").unsetLink().run();
+            }
+            setModalType(null);
+          }}
+          onClose={() => setModalType(null)}
+        />
+      )}
+
+      {modalType === "image" && (
+        <ImageUrlModal
+          title="Infoga bild från URL"
+          placeholder="https://exempel.se/bild.png"
+          onConfirm={(url) => {
+            if (url) {
+              editor?.chain().focus().setImage({ src: url }).run();
+            }
+            setModalType(null);
+          }}
+          onClose={() => setModalType(null)}
+        />
+      )}
+
       <style>{`
         .tiptap p { margin: 0 0 8px 0; }
         .tiptap ul, .tiptap ol { padding-left: 20px; margin: 4px 0; }
@@ -377,7 +620,6 @@ export default function RichTextEditor({
         .tiptap h1 { font-size: 1.4em; font-weight: bold; margin-bottom: 8px; }
         .tiptap h2 { font-size: 1.2em; font-weight: bold; margin-bottom: 6px; }
         .tiptap a { color: #6366f1; text-decoration: underline; cursor: pointer; }
-        .tiptap img { max-width: 100%; border-radius: 8px; margin: 8px 0; display: block; }
         .tiptap-container .is-editor-empty:first-child::before {
           color: #ccc;
           content: attr(data-placeholder);
