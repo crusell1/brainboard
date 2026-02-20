@@ -10,10 +10,12 @@ import {
   Position,
   NodeResizer,
   useNodeConnections,
+  useUpdateNodeInternals,
   type Node,
   type NodeProps,
 } from "@xyflow/react";
 import RichTextEditor from "../components/RichTextEditor";
+import { supabase } from "../lib/supabase";
 import { Sparkles, Loader2, Tag, Plus, X, Wand2, FileText } from "lucide-react";
 
 export type NoteData = {
@@ -126,6 +128,7 @@ export default function NoteNode({
   data,
   selected,
 }: NodeProps<NoteNodeType>) {
+  const updateNodeInternals = useUpdateNodeInternals();
   const [value, setValue] = useState(data.label ?? "");
   const [title, setTitle] = useState(data.title ?? "");
   const containerRef = useRef<HTMLDivElement>(null);
@@ -183,47 +186,96 @@ export default function NoteNode({
     onResizeRef.current = data.onResize;
   }, [data.onResize]);
 
+  // 🔥 NY: Uppdatera handles när storleken ändras (viktigt för realtid/edges)
   useEffect(() => {
-    setValue(data.label ?? "");
-  }, [data.label]);
+    updateNodeInternals(id);
+  }, [id, updateNodeInternals]);
+
+  useEffect(() => {
+    // 🔥 FIX: Uppdatera bara värdet från props om vi INTE redigerar själva.
+    // Detta förhindrar att "gammal" data från React-state skriver över det vi nyss skrev (lagget).
+    if (!data.isEditing) {
+      setValue(data.label ?? "");
+    }
+  }, [data.label, data.isEditing]);
 
   useEffect(() => {
     setTitle(data.title ?? "");
   }, [data.title]);
 
+  // 🔥 NY: Hantera bilduppladdning inuti editorn
+  const handleImageUpload = async (file: File): Promise<string | null> => {
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.user) {
+        alert("Du måste vara inloggad för att ladda upp bilder.");
+        return null;
+      }
+
+      const fileExt = file.name.split(".").pop() || "png";
+      const fileName = `${crypto.randomUUID()}.${fileExt}`;
+      const filePath = `${session.user.id}/${fileName}`;
+
+      const { error } = await supabase.storage
+        .from("images")
+        .upload(filePath, file);
+      if (error) throw error;
+
+      const { data: urlData } = supabase.storage
+        .from("images")
+        .getPublicUrl(filePath);
+      return urlData.publicUrl;
+    } catch (error) {
+      console.error("Upload failed:", error);
+      return null;
+    }
+  };
+
   // 🔥 Auto-resize logic: Mät texten och expandera noden om det behövs
   const checkSize = useCallback(() => {
-    if (!containerRef.current || !innerRef.current) return;
+    // Använd requestAnimationFrame för att garantera att vi mäter efter render
+    requestAnimationFrame(() => {
+      if (!containerRef.current || !innerRef.current) return;
 
-    // 1. Header-höjd (där innerRef börjar)
-    const headerHeight = innerRef.current.offsetTop;
+      // 1. Header-höjd (där innerRef börjar)
+      const headerHeight = innerRef.current.offsetTop;
 
-    // 2. Mät Editor-innehållet (Själva texten)
-    // Vi mäter .tiptap-elementet direkt eftersom containern nu kan vara stretchad (flex: 1)
-    const editorEl = innerRef.current.querySelector(".tiptap");
-    const editorContentHeight = editorEl ? editorEl.scrollHeight : 60;
-    const editorPadding = 24; // 12px top + 12px bottom
+      // 2. Mät innehållet i den mörka rutan (Editor + Summary)
+      let contentHeight = 0;
+      const editorWrapper = innerRef.current.querySelector(
+        ".rich-text-editor-wrapper",
+      );
+      if (editorWrapper) {
+        contentHeight += editorWrapper.scrollHeight;
+      } else {
+        contentHeight += 60; // Fallback
+      }
 
-    // 3. Mät Sammanfattning
-    const summaryEl = innerRef.current.querySelector(".summary-container");
-    const summaryHeight = summaryEl ? summaryEl.scrollHeight + 8 : 0;
+      const summaryEl = innerRef.current.querySelector(".summary-container");
+      if (summaryEl) {
+        contentHeight += summaryEl.scrollHeight + 12; // +12px margin-top
+      }
 
-    // 4. Total nödvändig höjd (+16px padding i botten)
-    const requiredHeight =
-      headerHeight + editorContentHeight + editorPadding + summaryHeight + 16;
+      // 3. Total nödvändig höjd
+      // Header + Content + DarkBoxPadding (24) + NodePadding (16)
+      const requiredHeight = headerHeight + contentHeight + 24 + 16;
 
-    setDynamicMinHeight(requiredHeight);
+      setDynamicMinHeight(requiredHeight);
 
-    if (isResizingRef.current) return;
+      if (isResizingRef.current) return;
 
-    const currentHeight = containerRef.current.offsetHeight;
-    const currentWidth = containerRef.current.offsetWidth;
+      const currentHeight = containerRef.current.offsetHeight;
+      const currentWidth = containerRef.current.offsetWidth;
 
-    // Expandera bara om innehållet faktiskt kräver mer plats än vad som finns.
-    // Vi tvingar inte ihop noden om användaren har gjort den större manuellt.
-    if (requiredHeight > currentHeight) {
-      onResizeRef.current?.(id, currentWidth, requiredHeight);
-    }
+      // Expandera bara om innehållet faktiskt kräver mer plats än vad som finns.
+      // Vi tvingar inte ihop noden om användaren har gjort den större manuellt.
+      if (requiredHeight > currentHeight + 2) {
+        onResizeRef.current?.(id, currentWidth, requiredHeight);
+      }
+    });
   }, [id, data.isEditing, data.summary]);
 
   // 🔥 FIX: Använd useLayoutEffect för att mäta INNAN paint (löser flimmer/sync-problem)
@@ -635,7 +687,7 @@ export default function NoteNode({
             cursor: "pointer",
             zIndex: 10,
           }}
-          title="Strukturera text ✨"
+          title="Städa, rätta & strukturera ✨"
         >
           {data.isProcessing ? (
             <Loader2 size={14} className="animate-spin" color="#6366f1" />
@@ -732,17 +784,14 @@ export default function NoteNode({
             borderRadius: 3,
             background: "transparent",
             color: "#111",
-            fontSize: 14,
-            fontWeight: 600,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             cursor: "pointer",
-            lineHeight: 1,
             zIndex: 10, // Se till att krysset ligger överst
           }}
         >
-          ×
+          <X size={14} />
         </div>
       )}
 
@@ -796,6 +845,7 @@ export default function NoteNode({
             flexDirection: "column",
             width: "100%",
             flex: 1, // 🔥 FIX: Låt denna växa också
+            flexShrink: 0, // 🔥 FIX: Förhindra krympning
           }}
         >
           {/* Editor Container (Mörk ruta) */}
@@ -809,58 +859,72 @@ export default function NoteNode({
               flexDirection: "column",
               minHeight: "60px", // Minsta höjd för editorn
               flex: 1, // 🔥 FIX: Låt editorn växa och fylla utrymmet (knuffar ner summary)
+              flexShrink: 0, // 🔥 FIX: Förhindra krympning
             }}
           >
             <RichTextEditor
               content={value}
               isEditing={!!data.isEditing}
               startListeningOnMount={!!data.startListening}
+              onImageUpload={handleImageUpload}
               onChange={(html) => {
                 setValue(html);
                 data.onChange(id, html);
               }}
               onBlur={stopEdit}
             />
-          </div>
 
-          {/* Sammanfattning */}
-          {data.summary && (
-            <div
-              className="summary-container" // 🔥 Klass för att kunna mäta elementet
-              style={{
-                marginTop: 8,
-                padding: "8px 12px",
-                background: "rgba(0, 0, 0, 0.05)",
-                borderRadius: 8,
-                fontSize: "12px",
-                color: "#444",
-                fontStyle: "italic",
-                borderLeft: "2px solid #6366f1",
-                position: "relative",
-                paddingRight: "24px",
-                flexShrink: 0, // Krymp inte
-              }}
-            >
-              {data.summary}
+            {/* 🔥 FIX: Sammanfattning flyttad INUTI den mörka rutan */}
+            {data.summary && (
               <div
-                onClick={(e) => {
-                  e.stopPropagation();
-                  data.onSummaryChange?.(id, "");
-                }}
+                className="summary-container"
                 style={{
-                  position: "absolute",
-                  top: 4,
-                  right: 4,
-                  cursor: "pointer",
-                  opacity: 0.6,
-                  padding: 2,
+                  marginTop: 12,
+                  paddingTop: 12,
+                  borderTop: "1px solid rgba(255, 255, 255, 0.1)",
+                  fontSize: "13px",
+                  color: "#ccc",
+                  fontStyle: "italic",
+                  position: "relative",
+                  lineHeight: "1.5",
                 }}
-                title="Ta bort sammanfattning"
               >
-                <X size={12} />
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 6,
+                    marginBottom: 4,
+                    alignItems: "center",
+                    color: "#6366f1",
+                    fontWeight: 600,
+                    fontSize: "11px",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  <Sparkles size={12} />
+                  AI Sammanfattning
+                </div>
+                {data.summary}
+                <div
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    data.onSummaryChange?.(id, "");
+                  }}
+                  style={{
+                    position: "absolute",
+                    top: 12,
+                    right: 0,
+                    cursor: "pointer",
+                    opacity: 0.6,
+                    padding: 4,
+                  }}
+                  title="Ta bort sammanfattning"
+                >
+                  <X size={14} />
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
     </div>

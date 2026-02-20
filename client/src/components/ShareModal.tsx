@@ -125,29 +125,31 @@ export default function ShareModal({ boardId, onClose }: ShareModalProps) {
         left: 0,
         width: "100vw",
         height: "100vh",
-        background: "rgba(0,0,0,0.6)",
-        backdropFilter: "blur(4px)",
+        background: "rgba(0,0,0,0.7)",
+        backdropFilter: "blur(8px)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         zIndex: 3000,
+        animation: "fadeIn 0.2s ease-out",
       }}
       onClick={onClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: "#1e1e24",
-          border: "1px solid #333",
-          borderRadius: "16px",
-          padding: "24px",
+          background: "linear-gradient(145deg, #1e1e24, #1a1a20)",
+          border: "1px solid rgba(255,255,255,0.1)",
+          borderRadius: "24px",
+          padding: "32px",
           width: "100%",
-          maxWidth: "450px",
+          maxWidth: "480px",
           color: "white",
-          boxShadow: "0 20px 50px rgba(0,0,0,0.5)",
+          boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
           display: "flex",
           flexDirection: "column",
-          gap: "20px",
+          gap: "24px",
+          animation: "scaleUp 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
         }}
       >
         <div
@@ -160,23 +162,40 @@ export default function ShareModal({ boardId, onClose }: ShareModalProps) {
           <h2
             style={{
               margin: 0,
-              fontSize: "20px",
+              fontSize: "24px",
+              fontWeight: 700,
               display: "flex",
               alignItems: "center",
-              gap: "10px",
+              gap: "12px",
+              background: "linear-gradient(to right, #fff, #a5b4fc)",
+              WebkitBackgroundClip: "text",
+              WebkitTextFillColor: "transparent",
             }}
           >
-            <Users size={20} color="#6366f1" />
+            <Users size={24} color="#6366f1" />
             Dela Board
           </h2>
           <button
             onClick={onClose}
             style={{
-              background: "none",
+              background: "rgba(255,255,255,0.05)",
               border: "none",
-              color: "#888",
+              borderRadius: "50%",
+              width: 32,
+              height: 32,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#ccc",
               cursor: "pointer",
+              transition: "all 0.2s",
             }}
+            onMouseEnter={(e) =>
+              (e.currentTarget.style.background = "rgba(255,255,255,0.1)")
+            }
+            onMouseLeave={(e) =>
+              (e.currentTarget.style.background = "rgba(255,255,255,0.05)")
+            }
           >
             <X size={20} />
           </button>
@@ -185,16 +204,23 @@ export default function ShareModal({ boardId, onClose }: ShareModalProps) {
         {/* Skapa ny länk sektion */}
         <div
           style={{
-            background: "#2a2a30",
-            padding: "16px",
-            borderRadius: "12px",
+            background: "rgba(0,0,0,0.2)",
+            padding: "20px",
+            borderRadius: "16px",
+            border: "1px solid rgba(255,255,255,0.05)",
             display: "flex",
             flexDirection: "column",
-            gap: "12px",
+            gap: "16px",
           }}
         >
           <label
-            style={{ fontSize: "12px", color: "#aaa", fontWeight: "bold" }}
+            style={{
+              fontSize: "11px",
+              color: "#818cf8",
+              fontWeight: "700",
+              letterSpacing: "0.5px",
+              textTransform: "uppercase",
+            }}
           >
             SKAPA NY LÄNK
           </label>
@@ -205,12 +231,16 @@ export default function ShareModal({ boardId, onClose }: ShareModalProps) {
                 onClick={() => setDuration(opt)}
                 style={{
                   flex: 1,
-                  padding: "8px",
-                  borderRadius: "8px",
+                  padding: "10px",
+                  borderRadius: "10px",
                   border:
-                    duration === opt ? "1px solid #6366f1" : "1px solid #444",
+                    duration === opt
+                      ? "1px solid #6366f1"
+                      : "1px solid rgba(255,255,255,0.1)",
                   background:
-                    duration === opt ? "rgba(99, 102, 241, 0.1)" : "#333",
+                    duration === opt
+                      ? "rgba(99, 102, 241, 0.2)"
+                      : "rgba(255,255,255,0.05)",
                   color: duration === opt ? "#fff" : "#888",
                   cursor: "pointer",
                   fontSize: "13px",
@@ -226,11 +256,11 @@ export default function ShareModal({ boardId, onClose }: ShareModalProps) {
             onClick={generateLink}
             disabled={loading}
             style={{
-              padding: "10px",
+              padding: "12px",
               background: "#6366f1",
               color: "white",
               border: "none",
-              borderRadius: "8px",
+              borderRadius: "10px",
               fontSize: "14px",
               fontWeight: 600,
               cursor: "pointer",
@@ -238,7 +268,11 @@ export default function ShareModal({ boardId, onClose }: ShareModalProps) {
               alignItems: "center",
               justifyContent: "center",
               gap: "8px",
+              transition: "background 0.2s",
+              boxShadow: "0 4px 12px rgba(99, 102, 241, 0.3)",
             }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "#4f46e5")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "#6366f1")}
           >
             {loading ? (
               <Loader2 className="animate-spin" size={16} />
@@ -253,7 +287,13 @@ export default function ShareModal({ boardId, onClose }: ShareModalProps) {
         {/* Lista över aktiva länkar */}
         <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
           <label
-            style={{ fontSize: "12px", color: "#aaa", fontWeight: "bold" }}
+            style={{
+              fontSize: "11px",
+              color: "#aaa",
+              fontWeight: "700",
+              letterSpacing: "0.5px",
+              textTransform: "uppercase",
+            }}
           >
             AKTIVA LÄNKAR ({invites.length})
           </label>
@@ -279,10 +319,10 @@ export default function ShareModal({ boardId, onClose }: ShareModalProps) {
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",
-                    background: "#111",
-                    padding: "10px",
-                    borderRadius: "8px",
-                    border: "1px solid #333",
+                    background: "rgba(0,0,0,0.3)",
+                    padding: "12px",
+                    borderRadius: "12px",
+                    border: "1px solid rgba(255,255,255,0.05)",
                   }}
                 >
                   <div
@@ -305,7 +345,8 @@ export default function ShareModal({ boardId, onClose }: ShareModalProps) {
                       {formatExpiry(invite.expires_at)}
                     </div>
                     <span style={{ fontSize: "11px", color: "#666" }}>
-                      Roll: {invite.role}
+                      Behörighet:{" "}
+                      <span style={{ color: "#ccc" }}>{invite.role}</span>
                     </span>
                   </div>
 
@@ -314,7 +355,10 @@ export default function ShareModal({ boardId, onClose }: ShareModalProps) {
                       onClick={() => copyToClipboard(invite.token, invite.id)}
                       title="Kopiera länk"
                       style={{
-                        background: copiedId === invite.id ? "#10b981" : "#333",
+                        background:
+                          copiedId === invite.id
+                            ? "#10b981"
+                            : "rgba(255,255,255,0.1)",
                         border: "none",
                         borderRadius: "6px",
                         width: "32px",
@@ -358,6 +402,16 @@ export default function ShareModal({ boardId, onClose }: ShareModalProps) {
           )}
         </div>
       </div>
+      <style>{`
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes scaleUp {
+          from { transform: scale(0.95); opacity: 0; }
+          to { transform: scale(1); opacity: 1; }
+        }
+      `}</style>
     </div>
   );
 }

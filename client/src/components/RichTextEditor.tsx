@@ -1,6 +1,8 @@
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
+import LinkExtension from "@tiptap/extension-link";
+import ImageExtension from "@tiptap/extension-image";
 import {
   Bold,
   Italic,
@@ -10,14 +12,18 @@ import {
   Heading2,
   Mic,
   MicOff,
+  Link as LinkIcon,
+  Unlink,
+  Image as ImageIcon,
 } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useMemo } from "react";
 import useSpeechRecognition from "../hooks/useSpeechRecognition";
 
 type RichTextEditorProps = {
   content: string;
   isEditing: boolean;
   startListeningOnMount?: boolean;
+  onImageUpload?: (file: File) => Promise<string | null>;
   onChange: (html: string) => void;
   onBlur: () => void;
 };
@@ -26,16 +32,32 @@ const MenuBar = ({
   editor,
   isListening,
   onToggleVoice,
+  onImageUpload,
   hasVoiceSupport,
 }: {
   editor: any;
   isListening: boolean;
   onToggleVoice: () => void;
+  onImageUpload?: (file: File) => Promise<string | null>;
   hasVoiceSupport: boolean;
 }) => {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   if (!editor) {
     return null;
   }
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && onImageUpload) {
+      const url = await onImageUpload(file);
+      if (url) {
+        editor.chain().focus().setImage({ src: url }).run();
+      }
+    }
+    // Återställ input
+    e.target.value = "";
+  };
 
   const buttonStyle = (isActive: boolean) => ({
     background: isActive ? "#6366f1" : "transparent",
@@ -108,6 +130,62 @@ const MenuBar = ({
         <ListOrdered size={14} />
       </button>
 
+      <div style={{ width: 1, background: "#444", margin: "0 4px" }} />
+
+      <button
+        onClick={() => {
+          const previousUrl = editor.getAttributes("link").href;
+          const url = window.prompt("URL", previousUrl);
+          if (url === null) return;
+          if (url === "") {
+            editor.chain().focus().extendMarkRange("link").unsetLink().run();
+            return;
+          }
+          editor
+            .chain()
+            .focus()
+            .extendMarkRange("link")
+            .setLink({ href: url })
+            .run();
+        }}
+        style={buttonStyle(editor.isActive("link"))}
+        title="Länk"
+      >
+        <LinkIcon size={14} />
+      </button>
+      <button
+        onClick={() => editor.chain().focus().unsetLink().run()}
+        disabled={!editor.isActive("link")}
+        style={{
+          ...buttonStyle(false),
+          opacity: editor.isActive("link") ? 1 : 0.5,
+          cursor: editor.isActive("link") ? "pointer" : "default",
+        }}
+        title="Ta bort länk"
+      >
+        <Unlink size={14} />
+      </button>
+
+      {onImageUpload && (
+        <>
+          <div style={{ width: 1, background: "#444", margin: "0 4px" }} />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            style={buttonStyle(false)}
+            title="Infoga bild"
+          >
+            <ImageIcon size={14} />
+          </button>
+          <input
+            type="file"
+            ref={fileInputRef}
+            style={{ display: "none" }}
+            accept="image/*"
+            onChange={handleFileSelect}
+          />
+        </>
+      )}
+
       {hasVoiceSupport && (
         <>
           <div style={{ width: 1, background: "#444", margin: "0 4px" }} />
@@ -136,6 +214,7 @@ export default function RichTextEditor({
   content,
   isEditing,
   startListeningOnMount,
+  onImageUpload,
   onChange,
   onBlur,
 }: RichTextEditorProps) {
@@ -148,13 +227,32 @@ export default function RichTextEditor({
     hasSupport,
   } = useSpeechRecognition();
 
-  const editor = useEditor({
-    extensions: [
-      StarterKit,
+  // 🔥 FIX: Använd useMemo för extensions för att undvika "Duplicate extension" varningar
+  const extensions = useMemo(
+    () => [
+      // @ts-ignore - Vi tvingar bort 'link' från StarterKit ifall det skulle finnas där
+      StarterKit.configure({ link: false }),
       Placeholder.configure({
         placeholder: "Skriv något...",
       }),
+      LinkExtension.configure({
+        openOnClick: true, // Öppna länkar vid klick (viktigt för view-mode)
+        autolink: true,
+        defaultProtocol: "https",
+        HTMLAttributes: {
+          target: "_blank", // Öppna i ny flik så man inte tappar bort sin board
+          rel: "noopener noreferrer",
+        },
+      }),
+      ImageExtension.configure({
+        inline: false,
+      }),
     ],
+    [],
+  );
+
+  const editor = useEditor({
+    extensions: extensions,
     content: content,
     editable: isEditing,
     autofocus: isEditing ? "end" : false, // 🔥 FIX: Säkerställ att vi får fokus direkt vid mount
@@ -241,12 +339,14 @@ export default function RichTextEditor({
 
   return (
     <div
+      className="rich-text-editor-wrapper" // 🔥 FIX: Klass för att kunna mäta höjden inklusive meny
       style={{
         display: "flex",
         flexDirection: "column",
         width: "100%",
         height: "auto",
         minHeight: "auto", // 🔥 FIX: Låt innehållet styra, tvinga inte 100%
+        flexShrink: 0,
       }}
     >
       {isEditing && (
@@ -254,6 +354,7 @@ export default function RichTextEditor({
           editor={editor}
           isListening={isListening}
           onToggleVoice={isListening ? stopListening : startListening}
+          onImageUpload={onImageUpload}
           hasVoiceSupport={hasSupport}
         />
       )}
@@ -275,6 +376,8 @@ export default function RichTextEditor({
         .tiptap ol { list-style-type: decimal; }
         .tiptap h1 { font-size: 1.4em; font-weight: bold; margin-bottom: 8px; }
         .tiptap h2 { font-size: 1.2em; font-weight: bold; margin-bottom: 6px; }
+        .tiptap a { color: #6366f1; text-decoration: underline; cursor: pointer; }
+        .tiptap img { max-width: 100%; border-radius: 8px; margin: 8px 0; display: block; }
         .tiptap-container .is-editor-empty:first-child::before {
           color: #ccc;
           content: attr(data-placeholder);

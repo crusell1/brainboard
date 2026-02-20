@@ -11,6 +11,8 @@ import {
   Lightbulb,
   Tags,
   AlignLeft,
+  Link,
+  Upload,
 } from "lucide-react";
 
 type RadialMenuProps = {
@@ -36,7 +38,7 @@ export default function RadialMenu({
   onClose,
   onSelect,
 }: RadialMenuProps) {
-  const [level, setLevel] = useState<"main" | "ai">("main");
+  const [level, setLevel] = useState<"main" | "ai" | "image">("main");
   const [isClosing, setIsClosing] = useState(false);
 
   // Återställ till huvudmenyn varje gång menyn öppnas på nytt
@@ -63,6 +65,7 @@ export default function RadialMenu({
       label: "Bild",
       icon: <ImageIcon size={24} />,
       color: "#10b981",
+      action: () => setLevel("image"), // Öppna undermeny för bild
     },
     {
       id: "draw",
@@ -108,7 +111,26 @@ export default function RadialMenu({
     },
   ];
 
-  const currentActions = level === "main" ? mainActions : aiActions;
+  // Definition av bild-undermenyn
+  const imageActions: MenuItem[] = [
+    {
+      id: "image-upload",
+      label: "Ladda upp",
+      icon: <Upload size={24} />,
+      color: "#10b981",
+    },
+    {
+      id: "image-url",
+      label: "Länk",
+      icon: <Link size={24} />,
+      color: "#3b82f6",
+    },
+  ];
+
+  let currentActions = mainActions;
+  if (level === "ai") currentActions = aiActions;
+  if (level === "image") currentActions = imageActions;
+
   const radius = 80; // Avstånd från mitten
 
   if (!isOpen && !isClosing) return null;

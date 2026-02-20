@@ -20,8 +20,10 @@ import NoteNode, { type NoteData } from "../nodes/NoteNode";
 import ImageNode from "../nodes/ImageNode";
 import RadialMenu from "../components/RadialMenu";
 import DrawingLayer from "../components/DrawingLayer";
+import CursorLayer from "../components/CursorLayer"; // 🔥 Importera CursorLayer
 import type { Drawing, Point } from "../types/drawing";
 import DrawModeControls from "../components/DrawModeControls";
+import ImageUrlModal from "../components/ImageUrlModal"; // 🔥 Importera ImageUrlModal
 import ShareModal from "../components/ShareModal"; // 🔥 Importera ShareModal
 import {
   Share2,
@@ -35,12 +37,34 @@ import {
   RotateCcw,
   RotateCw,
   User,
+  Wifi,
+  WifiOff,
 } from "lucide-react"; // 🔥 Importera ikoner
 
 const NODE_WIDTH = 300;
 const NODE_HEIGHT = 200;
 
 type Snapshot = { nodes: Node[]; edges: Edge[] };
+
+// Färger för cursors
+const CURSOR_COLORS = [
+  "#f43f5e",
+  "#ec4899",
+  "#d946ef",
+  "#8b5cf6",
+  "#6366f1",
+  "#3b82f6",
+  "#06b6d4",
+  "#10b981",
+  "#84cc16",
+  "#f59e0b",
+  "#f97316",
+];
+const getRandomColor = () =>
+  CURSOR_COLORS[Math.floor(Math.random() * CURSOR_COLORS.length)];
+
+// Typ för cursors
+type CursorState = { x: number; y: number; email: string; color: string };
 
 export default function Canvas() {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
@@ -65,9 +89,12 @@ export default function Canvas() {
   // 🔥 FIX: Använd useRef för timeout för att undvika race conditions vid dubbelklick
   const clickTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showShareModal, setShowShareModal] = useState(false); // 🔥 State för ShareModal
+  const [showUrlModal, setShowUrlModal] = useState(false); // 🔥 State för ImageUrlModal
   const [userEmail, setUserEmail] = useState(""); // 🔥 State för användarens email
   const [isEditingBoardName, setIsEditingBoardName] = useState(false); // 🔥 State för namnbyte
   const [newBoardName, setNewBoardName] = useState("");
+  const [isRealtimeConnected, setIsRealtimeConnected] = useState(false); // 🔥 State för uppkoppling
+  const isRealtimeConnectedRef = useRef(false); // 🔥 Ref för synkron åtkomst i callbacks
 
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showMobileSearch, setShowMobileSearch] = useState(false);
@@ -96,8 +123,30 @@ export default function Canvas() {
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentPoints, setCurrentPoints] = useState<Point[]>([]);
 
+  // State för Cursors
+  const [cursors, setCursors] = useState<Record<string, CursorState>>({});
+  const presenceChannelRef = useRef<any>(null);
+  const broadcastChannelRef = useRef<any>(null); // 🔥 Ref för att skicka broadcasts
+
   // Ref för dold fil-input
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 🔥 Ref för att spåra muspositionen för paste
+  const mousePosRef = useRef({ x: 0, y: 0 });
+
+  // 🔥 Ref för att begränsa antalet resize-anrop över nätverket
+  const lastResizeBroadcast = useRef(0);
+
+  // 🔥 Ref för att begränsa antalet text-uppdateringar över nätverket
+  const lastTextBroadcast = useRef(0);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      mousePosRef.current = { x: e.clientX, y: e.clientY };
+    };
+    window.addEventListener("mousemove", handleMouseMove);
+    return () => window.removeEventListener("mousemove", handleMouseMove);
+  }, []);
 
   /* =========================
      VIEWPORT PERSISTENCE
@@ -345,14 +394,129 @@ export default function Canvas() {
     };
 
     fetchNodes();
-  }, [setNodes, boardId]); // 🔥 Kör om när boardId sätts
+  }, [setNodes, setEdges, setDrawings, boardId]); // 🔥 Kör om när boardId sätts
 
-  // 1.5 Realtime Subscription (Synk mellan flikar)
+  // 1.5 & 1.6 Realtime Subscription (Synk + Cursors i samma kanal)
   useEffect(() => {
-    if (!boardId) return; // Vänta tills vi har en board
+    if (!boardId || !userEmail) return;
 
-    const channel = supabase
-      .channel("brainboard-sync")
+    const myColor = getRandomColor();
+
+    // 🔥 FIX: En gemensam kanal för allt (bättre prestanda och synk)
+    const channel = supabase.channel(`board:${boardId}`, {
+      config: {
+        presence: {
+          key: userEmail,
+        },
+        broadcast: { self: false }, // 🔥 Ta inte emot mina egna meddelanden
+      },
+    });
+
+    presenceChannelRef.current = channel;
+    broadcastChannelRef.current = channel; // Spara för att kunna skicka
+
+    channel
+      // 1. Presence (Cursors)
+      .on("presence", { event: "sync" }, () => {
+        const newState = channel.presenceState();
+        const newCursors: Record<string, CursorState> = {};
+
+        Object.keys(newState).forEach((key) => {
+          if (key !== userEmail) {
+            const presence = newState[key][0] as any;
+            if (presence && presence.x != null && presence.y != null) {
+              newCursors[key] = {
+                x: presence.x,
+                y: presence.y,
+                email: key,
+                color: presence.color || "#ff0000",
+              };
+            }
+          }
+        });
+        setCursors(newCursors);
+      })
+      // 🔥 1.5 Broadcast (Live updates utan DB-fördröjning)
+      .on("broadcast", { event: "node-drag" }, ({ payload }) => {
+        setNodes((nds) =>
+          nds.map((n) =>
+            n.id === payload.id
+              ? { ...n, position: payload.position } // Uppdatera position direkt
+              : n,
+          ),
+        );
+      })
+      .on("broadcast", { event: "node-change" }, ({ payload }) => {
+        setNodes((nds) =>
+          nds.map((n) => {
+            if (n.id === payload.id) {
+              // Uppdatera data (text, färg, etc)
+              return {
+                ...n,
+                data: {
+                  ...n.data,
+                  ...payload.data,
+                },
+                style: {
+                  ...n.style,
+                  ...payload.style,
+                },
+              };
+            }
+            return n;
+          }),
+        );
+      })
+      // 🔥 NY: Live Resize
+      .on("broadcast", { event: "node-resize" }, ({ payload }) => {
+        setNodes((nds) =>
+          nds.map((n) =>
+            n.id === payload.id
+              ? {
+                  ...n,
+                  style: {
+                    ...n.style,
+                    width: payload.width,
+                    height: payload.height,
+                  },
+                }
+              : n,
+          ),
+        );
+      })
+      // 🔥 NY: Lås nod vid redigering
+      .on("broadcast", { event: "node-lock" }, ({ payload }) => {
+        setNodes((nds) =>
+          nds.map((n) =>
+            n.id === payload.id
+              ? {
+                  ...n,
+                  // 🔥 Uppdatera position om den skickas med (krävs för resize från vänster/topp)
+                  position:
+                    payload.x !== undefined && payload.y !== undefined
+                      ? { x: payload.x, y: payload.y }
+                      : n.position,
+                  style: {
+                    ...n.style,
+                    width: payload.width,
+                    height: payload.height,
+                  },
+                }
+              : n,
+          ),
+        );
+      })
+      // 🔥 NY: Lås upp nod
+      .on("broadcast", { event: "node-unlock" }, ({ payload }) => {
+        setNodes((nds) =>
+          nds.map((n) =>
+            n.id === payload.id
+              ? { ...n, data: { ...n.data, lockedBy: undefined } }
+              : n,
+          ),
+        );
+      })
+      // 2. Nodes
       .on(
         "postgres_changes",
         {
@@ -360,15 +524,12 @@ export default function Canvas() {
           schema: "public",
           table: "nodes",
           filter: `board_id=eq.${boardId}`,
-        }, // 🔥 Optimering: Lyssna bara på denna board
+        },
         (payload) => {
-          // 🔥 Ignorera events från andra boards
-          if (payload.new && (payload.new as any).board_id !== boardId) return;
-
           if (payload.eventType === "INSERT") {
             const newNote = payload.new as Note;
             setNodes((nds) => {
-              // Undvik dubbletter om vi själva skapade den
+              // Undvik dubbletter
               if (nds.some((n) => n.id === newNote.id)) return nds;
               return [
                 ...nds,
@@ -434,12 +595,122 @@ export default function Canvas() {
           }
         },
       )
-      .subscribe();
+      // 3. Edges
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "edges",
+          filter: `board_id=eq.${boardId}`,
+        },
+        (payload) => {
+          if (payload.eventType === "INSERT") {
+            const newEdge = payload.new as DbEdge;
+            setEdges((eds) => {
+              if (eds.some((e) => e.id === newEdge.id)) return eds;
+              return [
+                ...eds,
+                {
+                  id: newEdge.id,
+                  source: newEdge.source,
+                  target: newEdge.target,
+                  sourceHandle: newEdge.source_handle,
+                  targetHandle: newEdge.target_handle,
+                },
+              ];
+            });
+          }
+          if (payload.eventType === "DELETE") {
+            setEdges((eds) => eds.filter((e) => e.id !== payload.old.id));
+          }
+          if (payload.eventType === "UPDATE") {
+            const updatedEdge = payload.new as DbEdge;
+            setEdges((eds) =>
+              eds.map((e) =>
+                e.id === updatedEdge.id
+                  ? {
+                      ...e,
+                      source: updatedEdge.source,
+                      target: updatedEdge.target,
+                      sourceHandle: updatedEdge.source_handle,
+                      targetHandle: updatedEdge.target_handle,
+                    }
+                  : e,
+              ),
+            );
+          }
+        },
+      )
+      // 4. Drawings
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "drawings",
+          filter: `board_id=eq.${boardId}`,
+        },
+        (payload) => {
+          if (payload.eventType === "INSERT") {
+            const newDrawing = payload.new as DbDrawing;
+            setDrawings((dwgs) => {
+              if (dwgs.some((d) => d.id === newDrawing.id)) return dwgs;
+              return [
+                ...dwgs,
+                {
+                  id: newDrawing.id,
+                  points: newDrawing.points,
+                  color: newDrawing.color,
+                  width: newDrawing.width,
+                  createdAt: new Date(newDrawing.created_at).getTime(),
+                },
+              ];
+            });
+          }
+          if (payload.eventType === "DELETE") {
+            setDrawings((dwgs) => dwgs.filter((d) => d.id !== payload.old.id));
+          }
+          if (payload.eventType === "UPDATE") {
+            const updatedDrawing = payload.new as DbDrawing;
+            setDrawings((dwgs) =>
+              dwgs.map((d) =>
+                d.id === updatedDrawing.id
+                  ? {
+                      ...d,
+                      points: updatedDrawing.points,
+                      color: updatedDrawing.color,
+                      width: updatedDrawing.width,
+                    }
+                  : d,
+              ),
+            );
+          }
+        },
+      )
+      .subscribe(async (status) => {
+        if (status === "SUBSCRIBED") {
+          console.log("✅ Realtime connected for board:", boardId);
+          setIsRealtimeConnected(true);
+          isRealtimeConnectedRef.current = true;
+          await channel.track({
+            x: null,
+            y: null,
+            color: myColor,
+            email: userEmail,
+          });
+        }
+        if (status === "CHANNEL_ERROR") {
+          console.error("❌ Realtime connection failed");
+          setIsRealtimeConnected(false);
+          isRealtimeConnectedRef.current = false;
+        }
+      });
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [setNodes, boardId]); // 🔥 Uppdatera prenumeration om board ändras
+  }, [boardId, userEmail, setNodes, setEdges, setDrawings]);
 
   // 2. Skapa nod i DB
   const createNodeInDb = useCallback(
@@ -518,6 +789,16 @@ export default function Canvas() {
     },
     [createNodeInDb],
   );
+
+  // 🔥 Debounce-funktion för att spara till DB (minskar anrop)
+  const debouncedSaveNodeRef = useRef<any>(null);
+  useEffect(() => {
+    let timeout: ReturnType<typeof setTimeout>;
+    debouncedSaveNodeRef.current = (node: Node) => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => saveNodeToDb(node), 1000); // Spara till DB efter 1s inaktivitet
+    };
+  }, [saveNodeToDb]);
 
   // 4. Ta bort nod från DB
   const deleteNodeFromDb = useCallback(async (nodeId: string) => {
@@ -710,6 +991,16 @@ export default function Canvas() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // 🔥 FIX: Ignorera global undo/redo om vi är i ett textfält (låt Tiptap hantera det)
+      const target = e.target as HTMLElement;
+      if (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable
+      ) {
+        return;
+      }
+
       if (e.ctrlKey || e.metaKey) {
         if (e.key === "z" && !e.shiftKey) {
           e.preventDefault();
@@ -725,58 +1016,132 @@ export default function Canvas() {
     return () => window.removeEventListener("keydown", handler);
   });
 
+  // 🔥 Hantera musrörelser för cursors
+  const lastCursorUpdate = useRef(0);
+  const handleCursorMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (!reactFlowInstance || !presenceChannelRef.current || !userEmail)
+        return;
+
+      const now = Date.now();
+      // 🔥 FIX: Uppdatering var 50ms (20fps) räcker och minskar nätverks-jitter
+      if (now - lastCursorUpdate.current > 50) {
+        lastCursorUpdate.current = now;
+
+        const position = reactFlowInstance.screenToFlowPosition({
+          x: e.clientX,
+          y: e.clientY,
+        });
+
+        // 🔥 FIX: Skicka alltid cursor-position (ta bort strikt check) för att garantera att de syns
+        presenceChannelRef.current.track({
+          x: position.x,
+          y: position.y,
+          email: userEmail,
+          color:
+            presenceChannelRef.current.presenceState()[userEmail]?.[0]?.color ||
+            "#ff0000",
+        });
+      }
+    },
+    [reactFlowInstance, userEmail],
+  );
+
   /* =========================
      NODE HANDLERS
   ========================== */
 
-  const updateNodeLabel = (nodeId: string, value: string) => {
-    // 🔥 FIX: Beräkna nya noder först, sen spara. Inga side-effects i setNodes!
-    const updatedNodes = nodes.map((node) => {
-      if (node.id === nodeId) {
-        const newNode = { ...node, data: { ...node.data, label: value } };
-        saveNodeToDb(newNode); // Spara till DB
-        return newNode;
-      }
-      return node;
-    });
+  const updateNodeLabel = useCallback((nodeId: string, value: string) => {
+    // 1. Broadcasta direkt till andra (Live!) - Throttlad för prestanda
+    const now = Date.now();
+    if (
+      now - lastTextBroadcast.current > 50 &&
+      isRealtimeConnectedRef.current
+    ) {
+      lastTextBroadcast.current = now;
+      broadcastChannelRef.current?.send({
+        type: "broadcast",
+        event: "node-change",
+        payload: { id: nodeId, data: { label: value } },
+      });
+    }
 
-    setNodes(updatedNodes);
-    saveSnapshot(updatedNodes, edges);
-  };
-
-  const updateNodeTitle = (nodeId: string, title: string) => {
+    // 2. Uppdatera state funktionellt (förhindrar loopar och stale closures)
     setNodes((nds) =>
       nds.map((node) => {
         if (node.id === nodeId) {
-          const newNode = { ...node, data: { ...node.data, title } };
-          saveNodeToDb(newNode);
+          const newNode = { ...node, data: { ...node.data, label: value } };
+          // 3. Spara till DB (Debounced)
+          debouncedSaveNodeRef.current?.(newNode);
           return newNode;
         }
         return node;
       }),
     );
-    // Vi sparar inte snapshot för varje bokstav i titeln, onBlur sköter DB-sparandet
-  };
+  }, []); // 🔥 Inga beroenden = stabil funktion
 
-  const startEditing = (nodeId: string) => {
+  const updateNodeTitle = useCallback(
+    (nodeId: string, title: string) => {
+      setNodes((nds) =>
+        nds.map((node) => {
+          if (node.id === nodeId) {
+            const newNode = { ...node, data: { ...node.data, title } };
+            saveNodeToDb(newNode);
+            return newNode;
+          }
+          return node;
+        }),
+      );
+    },
+    [saveNodeToDb],
+  );
+
+  const startEditing = useCallback(
+    (nodeId: string) => {
+      // 🔥 Broadcasta att vi låser noden
+      if (isRealtimeConnectedRef.current) {
+        broadcastChannelRef.current?.send({
+          type: "broadcast",
+          event: "node-lock",
+          payload: { id: nodeId, user: userEmail },
+        });
+      }
+
+      setNodes((nds) =>
+        nds.map((node) =>
+          node.id === nodeId
+            ? {
+                ...node,
+                data: { ...node.data, isEditing: true, lockedBy: userEmail }, // Sätt lås lokalt också
+              }
+            : node,
+        ),
+      );
+    },
+    [userEmail],
+  );
+
+  const stopEditing = useCallback((nodeId: string) => {
+    // 🔥 Broadcasta att vi låser upp noden
+    if (isRealtimeConnectedRef.current) {
+      broadcastChannelRef.current?.send({
+        type: "broadcast",
+        event: "node-unlock",
+        payload: { id: nodeId },
+      });
+    }
+
     setNodes((nds) =>
       nds.map((node) =>
         node.id === nodeId
-          ? { ...node, data: { ...node.data, isEditing: true } }
+          ? {
+              ...node,
+              data: { ...node.data, isEditing: false, lockedBy: undefined }, // Ta bort lås lokalt
+            }
           : node,
       ),
     );
-  };
-
-  const stopEditing = (nodeId: string) => {
-    setNodes((nds) =>
-      nds.map((node) =>
-        node.id === nodeId
-          ? { ...node, data: { ...node.data, isEditing: false } }
-          : node,
-      ),
-    );
-  };
+  }, []);
 
   // Gemensam städ-funktion för både "X"-klick och Backspace
   const cleanupNode = useCallback(
@@ -829,12 +1194,28 @@ export default function Canvas() {
   );
 
   const onResize = useCallback(
-    (nodeId: string, width: number, height: number) => {
+    (nodeId: string, width: number, height: number, x?: number, y?: number) => {
+      // 🔥 Broadcasta resize live (throttlad till var 30ms för prestanda)
+      const now = Date.now();
+      if (
+        now - lastResizeBroadcast.current > 30 &&
+        isRealtimeConnectedRef.current
+      ) {
+        lastResizeBroadcast.current = now;
+        broadcastChannelRef.current?.send({
+          type: "broadcast",
+          event: "node-resize",
+          payload: { id: nodeId, width, height, x, y }, // 🔥 Skicka med x/y
+        });
+      }
+
       setNodes((nds) => {
         const node = nds.find((n) => n.id === nodeId);
         if (node) {
           const updatedNode = {
             ...node,
+            position:
+              x !== undefined && y !== undefined ? { x, y } : node.position, // 🔥 Uppdatera lokalt
             style: { ...node.style, width, height },
           };
           return nds.map((n) => (n.id === nodeId ? updatedNode : n));
@@ -847,12 +1228,14 @@ export default function Canvas() {
 
   // 🔥 NY: Spara bara till DB när storleksändringen är KLAR (för prestanda)
   const onResizeEnd = useCallback(
-    (nodeId: string, width: number, height: number) => {
+    (nodeId: string, width: number, height: number, x?: number, y?: number) => {
       // 🔥 OPTIMERING: Använd instansen istället för 'nodes' state för att slippa omrenderingar
       const node = reactFlowInstance?.getNode(nodeId);
       if (node) {
         const updatedNode = {
           ...node,
+          position:
+            x !== undefined && y !== undefined ? { x, y } : node.position, // 🔥 Spara ny position till DB
           style: { ...node.style, width, height },
         };
         console.log("Resize End: Sparar till DB...", width, height);
@@ -861,6 +1244,18 @@ export default function Canvas() {
     },
     [reactFlowInstance, saveNodeToDb],
   );
+
+  // 🔥 Live Dragging
+  const onNodeDrag = useCallback((_event: React.MouseEvent, node: Node) => {
+    // Skicka position till andra direkt
+    if (isRealtimeConnectedRef.current) {
+      broadcastChannelRef.current?.send({
+        type: "broadcast",
+        event: "node-drag",
+        payload: { id: node.id, position: node.position },
+      });
+    }
+  }, []);
 
   const onColorChange = useCallback(
     (nodeId: string, color: string) => {
@@ -970,6 +1365,11 @@ export default function Canvas() {
               content: node.data.label || "", // Skicka texten (HTML från editorn), fallback till tom sträng
               action: action, // 🔥 Skicka vald action
               availableTags: existingTags, // 🔥 Skicka med befintliga taggar till AI
+              // 🔥 NY: Skicka med instruktioner för smartare städning (stavfel, listor)
+              instructions:
+                action === "organize"
+                  ? "Rätta stavfel, förbättra grammatik och formatera automatiskt som HTML-listor (<ul>/<ol>) om texten ser ut som en uppräkning. Behåll existerande HTML-taggar."
+                  : undefined,
             },
             // 🔥 FIX: Skicka med token explicit ifall klienten tappat den
             headers: {
@@ -1412,73 +1812,123 @@ export default function Canvas() {
      IMAGE HANDLING
   ========================== */
 
+  // 🔥 Hjälpfunktion för att skapa bildnod
+  const createImageNode = useCallback(
+    (url: string, x: number, y: number) => {
+      if (!reactFlowInstance) return;
+
+      const flowPosition = reactFlowInstance.screenToFlowPosition({ x, y });
+      const centeredPosition = {
+        x: flowPosition.x - 100,
+        y: flowPosition.y - 100,
+      };
+
+      const newImageNode: Node = {
+        id: crypto.randomUUID(),
+        type: "image",
+        position: centeredPosition,
+        data: { src: url, label: "Bild" },
+        style: { width: 300 },
+      };
+
+      createNodeInDb(newImageNode);
+      setNodes((nds) => {
+        const updatedNodes = [...nds, newImageNode];
+        saveSnapshot(updatedNodes, edges);
+        return updatedNodes;
+      });
+    },
+    [reactFlowInstance, createNodeInDb, setNodes, edges, saveSnapshot],
+  );
+
+  // 🔥 Hjälpfunktion för att ladda upp och skapa bildnod
+  const processImageFile = useCallback(
+    async (file: File, x: number, y: number) => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.user) {
+        alert("Du måste vara inloggad för att ladda upp bilder");
+        return;
+      }
+
+      const fileExt = file.name.split(".").pop() || "png";
+      const fileName = `${crypto.randomUUID()}.${fileExt}`;
+      const filePath = `${session.user.id}/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("images")
+        .upload(filePath, file);
+
+      if (uploadError) {
+        console.error("Error uploading image:", uploadError);
+        alert("Kunde inte ladda upp bild.");
+        return;
+      }
+
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from("images").getPublicUrl(filePath);
+
+      createImageNode(publicUrl, x, y);
+    },
+    [createImageNode],
+  );
+
+  // 🔥 Hantera Paste (Ctrl+V)
+  useEffect(() => {
+    const handlePaste = async (e: ClipboardEvent) => {
+      // Ignorera om vi skriver i ett input-fält
+      const target = e.target as HTMLElement;
+      if (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable
+      ) {
+        return;
+      }
+
+      // 1. Hantera bildfiler (Blob) från urklipp
+      if (e.clipboardData) {
+        const items = e.clipboardData.items;
+        for (let i = 0; i < items.length; i++) {
+          if (items[i].type.indexOf("image") !== -1) {
+            const file = items[i].getAsFile();
+            if (file) {
+              e.preventDefault();
+              await processImageFile(
+                file,
+                mousePosRef.current.x,
+                mousePosRef.current.y,
+              );
+              return; // Avsluta om vi hittade en bildfil
+            }
+          }
+        }
+
+        // 2. Hantera bild-URL (Text) från urklipp
+        const text = e.clipboardData.getData("text");
+        if (
+          text &&
+          text.match(/^https?:\/\/.*\.(jpeg|jpg|gif|png|webp|svg)(\?.*)?$/i)
+        ) {
+          e.preventDefault();
+          createImageNode(text, mousePosRef.current.x, mousePosRef.current.y);
+        }
+      }
+    };
+
+    window.addEventListener("paste", handlePaste);
+    return () => window.removeEventListener("paste", handlePaste);
+  }, [processImageFile, createImageNode]);
+
   const handleFileChange = async (
     event: React.ChangeEvent<HTMLInputElement>,
   ) => {
     const file = event.target.files?.[0];
-    if (!file || !reactFlowInstance) return;
-
-    // 1. Kontrollera att användaren är inloggad
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session?.user) {
-      console.error("Du måste vara inloggad för att ladda upp bilder");
-      return;
-    }
-
-    // 2. Förbered filnamn och sökväg (userId/uuid.ext)
-    const fileExt = file.name.split(".").pop();
-    const fileName = `${crypto.randomUUID()}.${fileExt}`;
-    const filePath = `${session.user.id}/${fileName}`;
-
-    // 3. Ladda upp till Supabase Storage
-    const { error: uploadError } = await supabase.storage
-      .from("images")
-      .upload(filePath, file);
-
-    if (uploadError) {
-      console.error("Error uploading image:", uploadError);
-      return;
-    }
-
-    // 4. Hämta publik URL
-    const {
-      data: { publicUrl },
-    } = supabase.storage.from("images").getPublicUrl(filePath);
-
-    // 5. Skapa nod med URL
-    const flowPosition = reactFlowInstance.screenToFlowPosition({
-      x: menuState.x,
-      y: menuState.y,
-    });
-
-    const centeredPosition = {
-      x: flowPosition.x - 100,
-      y: flowPosition.y - 100,
-    };
-
-    const newImageNode: Node = {
-      id: crypto.randomUUID(),
-      type: "image",
-      position: centeredPosition,
-      data: {
-        src: publicUrl, // Använd URL från Supabase
-        label: "Bild",
-      },
-      // 🔥 VIKTIGT: Sätt en fast standardbredd så bilden inte exploderar i storlek
-      style: {
-        width: 300,
-      },
-    };
-
-    // Spara till DB och uppdatera state
-    createNodeInDb(newImageNode);
-
-    const updatedNodes = [...nodes, newImageNode];
-    setNodes(updatedNodes);
-    saveSnapshot(updatedNodes, edges);
+    if (!file) return;
+    await processImageFile(file, menuState.x, menuState.y);
 
     // Återställ input så man kan välja samma fil igen om man vill
     event.target.value = "";
@@ -1493,9 +1943,14 @@ export default function Canvas() {
       return;
     }
 
-    if (optionId === "image") {
+    if (optionId === "image-upload") {
       // Trigga den dolda fil-inputen
       fileInputRef.current?.click();
+      return;
+    }
+
+    if (optionId === "image-url") {
+      setShowUrlModal(true);
       return;
     }
 
@@ -1605,6 +2060,7 @@ export default function Canvas() {
         background: "#111111",
         position: "relative", // 🔥 FIX: Nödvändigt för att RadialMenu (absolute) ska positioneras korrekt relativt denna container
         touchAction: "none", // 🔥 FIX: Förhindrar att webbläsaren zoomar hela sidan på mobil (fixar hackig zoom)
+        cursor: isDrawingMode ? "crosshair" : "default",
       }}
     >
       <ReactFlow
@@ -1632,10 +2088,20 @@ export default function Canvas() {
         onNodeClick={onNodeClick} // 🔥 FIX: Koppla in klick-hantering för noder
         onPaneClick={onPaneClick}
         onNodeDragStop={onNodeDragStop}
+        onNodeDrag={onNodeDrag} // 🔥 FIX: Live dragging
         onInit={(instance) => {
           setReactFlowInstance(
             instance as unknown as ReactFlowInstance<Node, Edge>,
           );
+        }}
+        onMouseMove={handleCursorMove} // 🔥 Spåra musrörelser
+        onMouseLeave={() => {
+          // Valfritt: Dölj cursor när man lämnar canvas
+          presenceChannelRef.current?.track({
+            x: null,
+            y: null,
+            email: userEmail,
+          });
         }}
       >
         <MiniMap
@@ -1661,6 +2127,9 @@ export default function Canvas() {
             });
           }}
         />
+
+        {/* 🔥 Cursor Layer - Visar andra användare */}
+        <CursorLayer cursors={cursors} />
 
         {/* Drawing Layer - Ligger inuti ReactFlow för att få tillgång till context */}
         <DrawingLayer
@@ -2065,6 +2534,14 @@ export default function Canvas() {
         />
       )}
 
+      {/* 🔥 Image URL Modal */}
+      {showUrlModal && (
+        <ImageUrlModal
+          onConfirm={(url) => createImageNode(url, menuState.x, menuState.y)}
+          onClose={() => setShowUrlModal(false)}
+        />
+      )}
+
       {/* 🔥 DESKTOP: "Inloggad som" indikator */}
       {!isMobile && (
         <div
@@ -2080,6 +2557,27 @@ export default function Canvas() {
           }}
         >
           Du är inloggad som: {userEmail}
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              marginLeft: 8,
+              gap: 4,
+              opacity: 0.7,
+            }}
+          >
+            {isRealtimeConnected ? (
+              <>
+                <Wifi size={12} color="#10b981" />{" "}
+                <span style={{ color: "#10b981" }}>Live</span>
+              </>
+            ) : (
+              <>
+                <WifiOff size={12} color="#ef4444" />{" "}
+                <span style={{ color: "#ef4444" }}>Offline</span>
+              </>
+            )}
+          </div>
         </div>
       )}
 

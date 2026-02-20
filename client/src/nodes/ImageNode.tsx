@@ -1,8 +1,10 @@
+import { useEffect } from "react";
 import {
   Handle,
   Position,
   useNodeConnections,
   NodeResizer,
+  useUpdateNodeInternals,
 } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 
@@ -61,6 +63,12 @@ export default function ImageNode({
   data,
   selected,
 }: NodeProps<ImageNodeType>) {
+  const updateNodeInternals = useUpdateNodeInternals();
+
+  useEffect(() => {
+    updateNodeInternals(id);
+  }, [id, updateNodeInternals]);
+
   return (
     <div
       style={{
