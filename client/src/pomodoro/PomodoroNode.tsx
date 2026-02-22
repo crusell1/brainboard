@@ -467,8 +467,8 @@ export default function PomodoroNode({
           borderRadius: 24,
           border: `1px solid ${status === "idle" ? "#333" : accentColor}`,
           boxShadow: selected
-            ? `0 0 0 2px , 0 10px 40px -10px rgba(0,0,0,0.5)`
-            : "0 10px 30px -10px rgba(0,0,0,0.5)",
+            ? `0 0 0 2px ${accentColor}, 0 10px 40px -10px ${glowColor}`
+            : `0 10px 30px -10px ${status === "idle" ? "rgba(0,0,0,0.5)" : glowColor}`,
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
