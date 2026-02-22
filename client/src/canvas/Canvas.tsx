@@ -18,6 +18,7 @@ import { supabase } from "../lib/supabase";
 import type { Note, DbEdge, DbDrawing } from "../types/database";
 import NoteNode, { type NoteData } from "../nodes/NoteNode";
 import ImageNode from "../nodes/ImageNode";
+import PomodoroNode from "../pomodoro/PomodoroNode"; // 🔥 Importera PomodoroNode
 import RadialMenu from "../components/RadialMenu";
 import DrawingLayer from "../components/DrawingLayer";
 import CursorLayer from "../components/CursorLayer"; // 🔥 Importera CursorLayer
@@ -67,11 +68,82 @@ const getRandomColor = () =>
 // Typ för cursors
 type CursorState = { x: number; y: number; email: string; color: string };
 
+// 🔥 NY: Helper för smartare AI-instruktioner (Heuristik för struktur)
+const getSmartCleanupInstructions = (content: string): string => {
+  // 1. Normalisera text för analys (ta bort HTML-taggar grovt för att hitta nyckelord)
+  const text = content.replace(/<[^>]*>/g, " ").toLowerCase();
+
+  // 2. Heuristik för Numrerad Lista (Sekvens / Instruktion)
+  const isSequential =
+    /\b(steg|först|sen|därefter|till sist|ordning|prioritet)\b/.test(text) ||
+    /\b\d+[.)]/.test(text) || // Matchar "1." eller "1)"
+    /\b[a-z][.)]/.test(text); // Matchar "a." eller "a)"
+
+  // 3. Heuristik för Rubriker (Sektioner / Strukturerad data)
+  const hasHeaders =
+    /\b(problem|mål|krav|idéer|sammanfattning|fördelar|nackdelar|slutsats):/.test(
+      text,
+    );
+
+  // 4. Heuristik för TODOs / Checklistor
+  const isTodo =
+    /\b(todo|att göra|kom ihåg|checklista)\b/.test(text) ||
+    /\[\s*\]/.test(text) || // Matchar "[ ]"
+    /- \[ \]/.test(text);
+
+  // 5. Bygg dynamiska instruktioner
+  let instructions = `
+    Du är en expert på att strukturera anteckningar.
+    Din uppgift: Städa upp texten, rätta stavfel, förbättra grammatik och applicera tydlig struktur.
+    
+    VIKTIGA REGLER:
+    1. Svara ENDAST med valid HTML (inga markdown-block, ingen inledning).
+    2. Håll texten kompakt och lättläst (max 6-10 rader om möjligt).
+    3. Behåll viktig information, ändra inte betydelsen.
+    4. Använd svenska.
+  `;
+
+  if (hasHeaders) {
+    instructions += `
+    STRUKTUR:
+    - Texten innehåller tydliga sektioner (t.ex. Problem, Mål). 
+    - Använd <strong> eller <h3> för dessa rubriker.
+    - Gruppera innehållet under respektive rubrik med punktlistor (<ul>) eller paragrafer (<p>).
+    `;
+  } else if (isSequential) {
+    instructions += `
+    STRUKTUR:
+    - Texten är en sekvens, instruktion eller rangordning.
+    - Formatera som en NUMRERAD lista (<ol>).
+    - Varje steg ska vara tydligt och kortfattat.
+    `;
+  } else if (isTodo) {
+    instructions += `
+    STRUKTUR:
+    - Texten är en checklista eller TODO-lista.
+    - Formatera som en punktlista (<ul>).
+    - Inled gärna punkter med "Att göra:" om det passar.
+    `;
+  } else {
+    instructions += `
+    STRUKTUR:
+    - Om texten är en uppradning av saker/idéer: Använd PUNKTLISTA (<ul>).
+    - Om texten är löpande: Dela upp i korta stycken (<p>).
+    - Prioritera listor för läsbarhet framför långa stycken.
+    `;
+  }
+
+  return instructions.trim();
+};
+
 export default function Canvas() {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
-  const nodeTypes = useMemo(() => ({ note: NoteNode, image: ImageNode }), []);
+  const nodeTypes = useMemo(
+    () => ({ note: NoteNode, image: ImageNode, pomodoro: PomodoroNode }),
+    [],
+  ); // 🔥 Registrera pomodoro
 
   const [history, setHistory] = useState<Snapshot[]>([
     { nodes: [], edges: [] },
@@ -142,6 +214,10 @@ export default function Canvas() {
   // 🔥 Ref för att begränsa antalet text-uppdateringar över nätverket
   const lastTextBroadcast = useRef(0);
 
+  // 🔥 NY: Håll koll på vilka noder användaren interagerar med just nu (drag/resize)
+  // Detta förhindrar att inkommande DB-uppdateringar skriver över lokala pågående ändringar (jitter/loopar).
+  const interactingNodeIds = useRef<Set<string>>(new Set());
+
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       mousePosRef.current = { x: e.clientX, y: e.clientY };
@@ -171,8 +247,8 @@ export default function Canvas() {
      SUPABASE INTEGRATION
   ========================== */
 
-  // 1. Hämta data (noder och edges) vid start
-  useEffect(() => {
+  // 1. Hämta data (noder och edges). Utbruten funktion för att kunna återanvändas vid reconnect.
+  const fetchBoardData = useCallback(async () => {
     const fetchNodes = async () => {
       const {
         data: { session },
@@ -334,11 +410,17 @@ export default function Canvas() {
       if (data) {
         const loadedNodes = data.map((n: Note) => ({
           id: n.id,
-          type: n.type || "note", // Använd typ från DB, fallback till note
+          type: n.type || "note", // Använd typ från DB
           position: { x: n.position_x, y: n.position_y },
           style: {
-            width: n.width ?? NODE_WIDTH,
-            height: n.height ?? (n.type === "image" ? undefined : NODE_HEIGHT),
+            width: n.width ?? (n.type === "pomodoro" ? 300 : NODE_WIDTH),
+            height:
+              n.height ??
+              (n.type === "image"
+                ? undefined
+                : n.type === "pomodoro"
+                  ? 400
+                  : NODE_HEIGHT),
           },
           data: {
             // Om det är en bild ligger URL:en i content, annars är content texten
@@ -350,6 +432,13 @@ export default function Canvas() {
             tags: (n as any).tags || [],
             summary: (n as any).summary, // 🔥 Hämta summary
             aiTags: (n as any).ai_tags || [], // 🔥 Hämta ai_tags
+            // 🔥 Pomodoro data mapping
+            status: (n as any).status,
+            startTime: (n as any).start_time,
+            pausedTime: (n as any).paused_time,
+            duration: (n as any).duration,
+            plantId: (n as any).plant_id,
+            stats: (n as any).stats,
           },
         }));
         setNodes(loadedNodes);
@@ -396,7 +485,22 @@ export default function Canvas() {
     };
 
     fetchNodes();
-  }, [setNodes, setEdges, setDrawings, boardId]); // 🔥 Kör om när boardId sätts
+  }, [boardId, setNodes, setEdges, setDrawings]);
+
+  // Kör fetch vid mount och när boardId ändras
+  useEffect(() => {
+    fetchBoardData();
+  }, [fetchBoardData]);
+
+  // 🔥 NY: Lyssna på window focus för att uppdatera data när man kommer tillbaka till fliken/appen (Mobil-fix!)
+  useEffect(() => {
+    const onFocus = () => {
+      console.log("📱 App i förgrunden - hämtar senaste data...");
+      fetchBoardData();
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [fetchBoardData]);
 
   // 1.5 & 1.6 Realtime Subscription (Synk + Cursors i samma kanal)
   useEffect(() => {
@@ -441,11 +545,13 @@ export default function Canvas() {
       // 🔥 1.5 Broadcast (Live updates utan DB-fördröjning)
       .on("broadcast", { event: "node-drag" }, ({ payload }) => {
         setNodes((nds) =>
-          nds.map((n) =>
-            n.id === payload.id
-              ? { ...n, position: payload.position } // Uppdatera position direkt
-              : n,
-          ),
+          nds.map((n) => {
+            if (n.id === payload.id) {
+              if (interactingNodeIds.current.has(n.id)) return n; // 🔥 Ignorera om vi drar själva
+              return { ...n, position: payload.position };
+            }
+            return n;
+          }),
         );
       })
       .on("broadcast", { event: "node-change" }, ({ payload }) => {
@@ -472,18 +578,24 @@ export default function Canvas() {
       // 🔥 NY: Live Resize
       .on("broadcast", { event: "node-resize" }, ({ payload }) => {
         setNodes((nds) =>
-          nds.map((n) =>
-            n.id === payload.id
-              ? {
-                  ...n,
-                  style: {
-                    ...n.style,
-                    width: payload.width,
-                    height: payload.height,
-                  },
-                }
-              : n,
-          ),
+          nds.map((n) => {
+            if (n.id === payload.id) {
+              if (interactingNodeIds.current.has(n.id)) return n; // 🔥 Ignorera om vi ändrar storlek själva
+              return {
+                ...n,
+                position:
+                  payload.x !== undefined && payload.y !== undefined
+                    ? { x: payload.x, y: payload.y }
+                    : n.position, // 🔥 Uppdatera position vid top/left resize
+                style: {
+                  ...n.style,
+                  width: payload.width,
+                  height: payload.height,
+                },
+              };
+            }
+            return n;
+          }),
         );
       })
       // 🔥 NY: Lås nod vid redigering
@@ -551,6 +663,13 @@ export default function Canvas() {
                     label: newNote.type === "image" ? "Bild" : newNote.content,
                     color: newNote.color,
                     isEditing: false,
+                    // 🔥 Pomodoro defaults
+                    status: (newNote as any).status,
+                    startTime: (newNote as any).start_time,
+                    pausedTime: (newNote as any).paused_time,
+                    duration: (newNote as any).duration,
+                    plantId: (newNote as any).plant_id,
+                    stats: (newNote as any).stats,
                   },
                 } as Node,
               ];
@@ -559,37 +678,49 @@ export default function Canvas() {
           if (payload.eventType === "UPDATE") {
             const newNote = payload.new as Note;
             setNodes((nds) =>
-              nds.map((n) =>
-                n.id === newNote.id
-                  ? {
-                      ...n,
-                      position: {
-                        x: newNote.position_x,
-                        y: newNote.position_y,
-                      },
-                      style: {
-                        ...n.style,
-                        width: newNote.width,
-                        height:
-                          newNote.height ??
-                          (newNote.type === "image" ? undefined : 100),
-                      },
-                      data: {
-                        ...n.data,
-                        src:
-                          newNote.type === "image"
-                            ? newNote.content
-                            : undefined,
-                        title: newNote.title,
-                        label:
-                          newNote.type === "image" ? "Bild" : newNote.content,
-                        color: newNote.color,
-                        summary: (newNote as any).summary, // 🔥 Synka summary
-                        aiTags: (newNote as any).ai_tags || [], // 🔥 Synka ai_tags
-                      },
-                    }
-                  : n,
-              ),
+              nds.map((n) => {
+                if (n.id === newNote.id) {
+                  // 🔥 VIKTIGT: Om VI interagerar med noden just nu (drar/resizar),
+                  // ignorera remote-uppdateringar för position/storlek för att undvika "rubber-banding".
+                  if (interactingNodeIds.current.has(n.id)) {
+                    return n;
+                  }
+
+                  return {
+                    ...n,
+                    position: {
+                      x: newNote.position_x,
+                      y: newNote.position_y,
+                    },
+                    style: {
+                      ...n.style,
+                      width: newNote.width,
+                      height:
+                        newNote.height ??
+                        (newNote.type === "image" ? undefined : 100),
+                    },
+                    data: {
+                      ...n.data,
+                      src:
+                        newNote.type === "image" ? newNote.content : undefined,
+                      title: newNote.title,
+                      label:
+                        newNote.type === "image" ? "Bild" : newNote.content,
+                      color: newNote.color,
+                      summary: (newNote as any).summary, // 🔥 Synka summary
+                      aiTags: (newNote as any).ai_tags || [], // 🔥 Synka ai_tags
+                      // 🔥 Pomodoro sync
+                      status: (newNote as any).status,
+                      startTime: (newNote as any).start_time,
+                      pausedTime: (newNote as any).paused_time,
+                      duration: (newNote as any).duration,
+                      plantId: (newNote as any).plant_id,
+                      stats: (newNote as any).stats,
+                    },
+                  };
+                }
+                return n;
+              }),
             );
           }
           if (payload.eventType === "DELETE") {
@@ -741,9 +872,24 @@ export default function Canvas() {
         width: node.style?.width ?? NODE_WIDTH,
         height:
           node.style?.height ??
-          (node.type === "image" ? undefined : NODE_HEIGHT),
+          (node.type === "image"
+            ? undefined
+            : node.type === "pomodoro"
+              ? 400
+              : NODE_HEIGHT),
         color: node.data.color ?? "#f1f1f1",
         tags: node.data.tags || [],
+        // 🔥 Spara Pomodoro-specifik data (kräver att DB-kolumner finns eller att vi använder en JSONB-kolumn 'data')
+        // För enkelhetens skull antar vi här att vi kan spara extra fält i en JSONB-kolumn eller liknande.
+        // Om du använder Supabase och 'content' är text, kanske du vill serialisera detta där,
+        // eller lägga till kolumner i 'nodes'-tabellen: status, start_time, etc.
+        // Här visar jag hur man skickar det om kolumnerna finns (mappat till snake_case):
+        status: (node.data as any).status,
+        start_time: (node.data as any).startTime,
+        paused_time: (node.data as any).pausedTime,
+        duration: (node.data as any).duration,
+        plant_id: (node.data as any).plantId,
+        stats: (node.data as any).stats,
       });
 
       if (error) console.error("Error creating node:", error);
@@ -771,6 +917,13 @@ export default function Canvas() {
           tags: node.data.tags || [],
           summary: (node.data as any).summary, // 🔥 FIX: Spara summary
           ai_tags: (node.data as any).aiTags || [], // 🔥 FIX: Spara AI-taggar (mappa camelCase -> snake_case)
+          // 🔥 Pomodoro update
+          status: (node.data as any).status,
+          start_time: (node.data as any).startTime,
+          paused_time: (node.data as any).pausedTime,
+          duration: (node.data as any).duration,
+          plant_id: (node.data as any).plantId,
+          stats: (node.data as any).stats,
           // Vi skickar med updated_at för att vara säkra på att Supabase ser ändringen
           updated_at: new Date().toISOString(),
         })
@@ -1187,6 +1340,11 @@ export default function Canvas() {
     [cleanupNode],
   );
 
+  // 🔥 NY: Markera att vi börjar ändra storlek
+  const onResizeStart = useCallback((nodeId: string) => {
+    interactingNodeIds.current.add(nodeId);
+  }, []);
+
   const onResize = useCallback(
     (nodeId: string, width: number, height: number, x?: number, y?: number) => {
       // 🔥 Broadcasta resize live (throttlad till var 30ms för prestanda)
@@ -1223,6 +1381,9 @@ export default function Canvas() {
   // 🔥 NY: Spara bara till DB när storleksändringen är KLAR (för prestanda)
   const onResizeEnd = useCallback(
     (nodeId: string, width: number, height: number, x?: number, y?: number) => {
+      // 🔥 Ta bort låsningen
+      interactingNodeIds.current.delete(nodeId);
+
       // 🔥 OPTIMERING: Använd instansen istället för 'nodes' state för att slippa omrenderingar
       const node = reactFlowInstance?.getNode(nodeId);
       if (node) {
@@ -1237,6 +1398,14 @@ export default function Canvas() {
       }
     },
     [reactFlowInstance, saveNodeToDb],
+  );
+
+  // 🔥 NY: Hantera start av drag
+  const onNodeDragStart = useCallback(
+    (_event: React.MouseEvent, node: Node) => {
+      interactingNodeIds.current.add(node.id);
+    },
+    [],
   );
 
   // 🔥 Live Dragging
@@ -1316,6 +1485,25 @@ export default function Canvas() {
     [saveNodeToDb, setNodes],
   );
 
+  // 🔥 NY: Generisk data-uppdaterare för PomodoroNode
+  const onNodeDataChange = useCallback(
+    (nodeId: string, newData: any) => {
+      setNodes((nds) =>
+        nds.map((node) => {
+          if (node.id === nodeId) {
+            const updatedNode = { ...node, data: { ...node.data, ...newData } };
+            // Spara direkt till DB (eller via debounce om det är frekvent)
+            // För timer-status vill vi ofta spara direkt.
+            saveNodeToDb(updatedNode);
+            return updatedNode;
+          }
+          return node;
+        }),
+      );
+    },
+    [saveNodeToDb, setNodes],
+  );
+
   const onMagic = useCallback(
     async (nodeId: string, action: "organize" | "analyze" = "organize") => {
       // 🔥 FIX: Använd instansen för att hämta noden, så vi slipper beroende till 'nodes'
@@ -1362,7 +1550,9 @@ export default function Canvas() {
               // 🔥 NY: Skicka med instruktioner för smartare städning (stavfel, listor)
               instructions:
                 action === "organize"
-                  ? "Rätta stavfel, förbättra grammatik och formatera automatiskt som HTML-listor (<ul>/<ol>) om texten ser ut som en uppräkning. Behåll existerande HTML-taggar."
+                  ? getSmartCleanupInstructions(
+                      (node.data.label as string) || "",
+                    ) // 🔥 Använd smartare instruktioner
                   : undefined,
             },
             // 🔥 FIX: Skicka med token explicit ifall klienten tappat den
@@ -1433,12 +1623,14 @@ export default function Canvas() {
         onStopEditing: stopEditing,
         onDelete: deleteNodeManual,
         onResize: onResize,
+        onResizeStart: onResizeStart, // 🔥 Koppla in nya handlern
         onResizeEnd: onResizeEnd, // Skicka med den nya funktionen
         onColorChange: onColorChange,
         onMagic: onMagic,
         onTagsChange: updateNodeTags,
         onAiTagsChange: updateNodeAiTags,
         onSummaryChange: updateNodeSummary,
+        onDataChange: onNodeDataChange, // 🔥 Skicka med generisk handler
       },
     }),
     [
@@ -1448,11 +1640,13 @@ export default function Canvas() {
       stopEditing,
       deleteNodeManual,
       onResize,
+      onResizeStart,
       onResizeEnd,
       onColorChange,
       onMagic,
       updateNodeTags,
       updateNodeAiTags,
+      onNodeDataChange,
       updateNodeSummary,
     ],
   );
@@ -1559,6 +1753,7 @@ export default function Canvas() {
           searchTerm: debouncedTerm,
           isMatch: isMatch,
           isConnected: isVisible,
+          currentUserEmail: userEmail, // 🔥 Skicka med inloggad email till noden
         },
       };
     });
@@ -1797,6 +1992,7 @@ export default function Canvas() {
 
   const onNodeDragStop = useCallback(
     (_event: React.MouseEvent, node: Node) => {
+      interactingNodeIds.current.delete(node.id); // 🔥 Släpp låsningen
       saveNodeToDb(node);
     },
     [saveNodeToDb],
@@ -2023,6 +2219,33 @@ export default function Canvas() {
       saveSnapshot(updatedNodes, edges);
     }
 
+    if (optionId === "pomodoro") {
+      if (!reactFlowInstance) return;
+      const flowPosition = reactFlowInstance.screenToFlowPosition({
+        x: menuState.x,
+        y: menuState.y,
+      });
+      const centeredPosition = {
+        x: flowPosition.x - 150, // Halva bredden av PomodoroNode
+        y: flowPosition.y - 100,
+      };
+
+      const newNode: Node = {
+        id: crypto.randomUUID(),
+        type: "pomodoro", // 🔥 Vår nya typ
+        position: centeredPosition,
+        data: {
+          plantId: "sunflower",
+          status: "idle",
+          stats: { completed: 0, streak: 0, totalMinutes: 0 }, // 🔥 VIKTIGT: Initiera stats så DB inte klagar
+          duration: 25 * 60 * 1000, // 🔥 VIKTIGT: Initiera duration
+        },
+        style: { width: 300, height: 400 },
+      };
+      createNodeInDb(newNode);
+      setNodes((nds) => [...nds, newNode]);
+    }
+
     // Hantera AI-actions (Placeholder för framtida logik)
     if (optionId.startsWith("ai-")) {
       if (!reactFlowInstance) return;
@@ -2082,6 +2305,7 @@ export default function Canvas() {
         onNodeClick={onNodeClick} // 🔥 FIX: Koppla in klick-hantering för noder
         onPaneClick={onPaneClick}
         onNodeDragStop={onNodeDragStop}
+        onNodeDragStart={onNodeDragStart} // 🔥 FIX: Koppla in start-hantering
         onNodeDrag={onNodeDrag} // 🔥 FIX: Live dragging
         onInit={(instance) => {
           setReactFlowInstance(

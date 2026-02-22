@@ -35,8 +35,21 @@ export type NoteData = {
   onStopEditing: (nodeId: string) => void;
   onStartEditing: (nodeId: string) => void;
   onDelete?: (nodeId: string) => void;
-  onResize?: (nodeId: string, width: number, height: number) => void;
-  onResizeEnd?: (nodeId: string, width: number, height: number) => void;
+  onResize?: (
+    nodeId: string,
+    width: number,
+    height: number,
+    x?: number,
+    y?: number,
+  ) => void;
+  onResizeStart?: (nodeId: string) => void; // 🔥 NY: För att låsa noden vid resize
+  onResizeEnd?: (
+    nodeId: string,
+    width: number,
+    height: number,
+    x?: number,
+    y?: number,
+  ) => void;
   onColorChange?: (nodeId: string, color: string) => void;
   onTitleChange?: (nodeId: string, title: string) => void;
   searchTerm?: string; // Ny prop för sökning
@@ -469,15 +482,22 @@ export default function NoteNode({
         minHeight={Math.max(150, dynamicMinHeight)} // 🔥 Använd dynamisk höjd
         onResizeStart={() => {
           isResizingRef.current = true; // 🔥 Pausa auto-resize
+          data.onResizeStart?.(id); // 🔥 Signalera till Canvas att vi börjar ändra storlek
         }}
         onResize={(_e, params) => {
           // Uppdatera bara visuellt medan vi drar (snabbt)
-          data.onResize?.(id, params.width, params.height);
+          data.onResize?.(id, params.width, params.height, params.x, params.y); // 🔥 Skicka med x/y
         }}
         onResizeEnd={(_e, params) => {
           isResizingRef.current = false; // 🔥 Återaktivera auto-resize
           // Spara till DB när vi släpper (förhindrar lagg)
-          data.onResizeEnd?.(id, params.width, params.height);
+          data.onResizeEnd?.(
+            id,
+            params.width,
+            params.height,
+            params.x,
+            params.y,
+          ); // 🔥 Skicka med x/y
           checkSize(); // 🔥 Säkerställ att vi inte lämnar noden i ett ogiltigt läge
         }}
         handleStyle={{

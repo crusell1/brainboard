@@ -12,8 +12,21 @@ export type ImageNodeData = {
   src: string;
   label?: string;
   onDelete?: (id: string) => void;
-  onResize?: (id: string, width: number, height: number) => void;
-  onResizeEnd?: (id: string, width: number, height: number) => void;
+  onResize?: (
+    id: string,
+    width: number,
+    height: number,
+    x?: number,
+    y?: number,
+  ) => void;
+  onResizeStart?: (id: string) => void; // 🔥 NY
+  onResizeEnd?: (
+    id: string,
+    width: number,
+    height: number,
+    x?: number,
+    y?: number,
+  ) => void;
 };
 
 export type ImageNodeType = Node<ImageNodeData, "image">;
@@ -90,11 +103,20 @@ export default function ImageNode({
         minWidth={100}
         minHeight={100}
         keepAspectRatio={true}
+        onResizeStart={() => {
+          data.onResizeStart?.(id); // 🔥 Signalera start
+        }}
         onResize={(_e, params) => {
-          data.onResize?.(id, params.width, params.height);
+          data.onResize?.(id, params.width, params.height, params.x, params.y); // 🔥 Skicka med x/y
         }}
         onResizeEnd={(_e, params) => {
-          data.onResizeEnd?.(id, params.width, params.height);
+          data.onResizeEnd?.(
+            id,
+            params.width,
+            params.height,
+            params.x,
+            params.y,
+          ); // 🔥 Skicka med x/y
         }}
         handleStyle={{
           width: 40, // 🔥 Öka touch-ytan rejält för mobil
