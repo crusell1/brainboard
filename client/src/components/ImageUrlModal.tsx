@@ -42,7 +42,7 @@ export default function ImageUrlModal({
         height: "100vh",
         background: "rgba(0, 0, 0, 0.6)",
         backdropFilter: "blur(4px)",
-        zIndex: 5000,
+        zIndex: 20000, // 🔥 FIX: Extremt högt z-index för att garantera synlighet
         display: "flex",
         alignItems: "center",
         justifyContent: "center",

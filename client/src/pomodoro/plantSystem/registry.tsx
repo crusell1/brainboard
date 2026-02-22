@@ -1,6 +1,6 @@
-import React from "react";
 import type { PlantDefinition } from "../types";
 import { Sprout, Flower, Trees, Leaf } from "lucide-react";
+import { StitchPlant, StitchFlower } from "./StitchPlant"; // Importera komponenten också
 
 // Helper för att skapa enkla stadier med Lucide-ikoner
 const createSimpleStages = (color: string) => [
@@ -45,6 +45,7 @@ export const PLANTS: Record<string, PlantDefinition> = {
     name: "Ros",
     stages: createSimpleStages("#f43f5e"),
   },
+  stitchFlower: StitchPlant, // Standardplantan (använder DEFAULT_DNA)
 };
 
 export const getRandomPlantId = () => {
@@ -52,4 +53,7 @@ export const getRandomPlantId = () => {
   return keys[Math.floor(Math.random() * keys.length)];
 };
 
-export const getPlant = (id: string) => PLANTS[id] || PLANTS["sunflower"];
+export const getPlant = (id: string) => PLANTS[id] || PLANTS["stitchFlower"];
+
+// 🔥 Exportera motorn så vi kan använda den i Collection View senare
+export { StitchFlower };

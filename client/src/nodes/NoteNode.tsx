@@ -17,6 +17,7 @@ import {
 import RichTextEditor from "../components/RichTextEditor";
 import { supabase } from "../lib/supabase";
 import { Sparkles, Loader2, Tag, Plus, X, Wand2, FileText } from "lucide-react";
+import { BaseNode } from "../components/BaseNode";
 
 export type NoteData = {
   title?: string;
@@ -60,7 +61,15 @@ export type NoteData = {
 
 export type NoteNodeType = Node<NoteData, "note">;
 
-const COLORS = ["#f1f1f1", "#ffef9e", "#ffc4c4", "#b8e6ff", "#b5ffc6"];
+const COLORS = [
+  "#f1f1f1",
+  "#ffef9e",
+  "#ffc4c4",
+  "#b8e6ff",
+  "#b5ffc6",
+  "#e7c6ff",
+  "#ffd8b1",
+];
 
 const DEFAULT_TAGS = [
   "skola",
@@ -146,7 +155,6 @@ export default function NoteNode({
   const [title, setTitle] = useState(data.title ?? "");
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const innerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null); // 🔥 NY: Wrapper för att mäta innehåll säkert
   const [showTagMenu, setShowTagMenu] = useState(false);
   const [showMagicMenu, setShowMagicMenu] = useState(false);
@@ -202,7 +210,9 @@ export default function NoteNode({
 
   // 🔥 NY: Uppdatera handles när storleken ändras (viktigt för realtid/edges)
   useEffect(() => {
-    updateNodeInternals(id);
+    requestAnimationFrame(() => {
+      updateNodeInternals(id);
+    });
   }, [id, updateNodeInternals]);
 
   useEffect(() => {
@@ -252,30 +262,13 @@ export default function NoteNode({
   const checkSize = useCallback(() => {
     // Använd requestAnimationFrame för att garantera att vi mäter efter render
     requestAnimationFrame(() => {
-      if (!containerRef.current || !innerRef.current) return;
+      if (!containerRef.current || !contentRef.current) return;
 
-      // 1. Header-höjd (där innerRef börjar)
-      const headerHeight = innerRef.current.offsetTop;
+      // Mät innehållet (inklusive padding eftersom contentRef har padding)
+      const contentHeight = contentRef.current.scrollHeight;
 
-      // 2. Mät innehållet i den mörka rutan (Editor + Summary)
-      let contentHeight = 0;
-      const editorWrapper = innerRef.current.querySelector(
-        ".rich-text-editor-wrapper",
-      );
-      if (editorWrapper) {
-        contentHeight += editorWrapper.scrollHeight;
-      } else {
-        contentHeight += 60; // Fallback
-      }
-
-      const summaryEl = innerRef.current.querySelector(".summary-container");
-      if (summaryEl) {
-        contentHeight += summaryEl.scrollHeight + 12; // +12px margin-top
-      }
-
-      // 3. Total nödvändig höjd
-      // Header + Content + DarkBoxPadding (24) + NodePadding (16)
-      const requiredHeight = headerHeight + contentHeight + 24 + 16;
+      // Total nödvändig höjd (Header ca 48px + content)
+      const requiredHeight = 48 + contentHeight;
 
       setDynamicMinHeight(requiredHeight);
 
@@ -295,7 +288,7 @@ export default function NoteNode({
   // 🔥 FIX: Använd useLayoutEffect för att mäta INNAN paint (löser flimmer/sync-problem)
   useLayoutEffect(() => {
     // Vi observerar contentRef eftersom det är där texten och summary bor
-    const target = contentRef.current || innerRef.current;
+    const target = contentRef.current;
     if (!target) return;
 
     // 1. ResizeObserver: Lyssna på storleksändringar (t.ex. radbrytning)
@@ -345,137 +338,162 @@ export default function NoteNode({
 
   // Beräkna box-shadow baserat på sökstatus
   const isSearchActive = !!data.searchTerm;
-  let boxShadow = "0 8px 20px rgba(0,0,0,0.15)"; // Default skugga
-
   if (isSearchActive) {
-    if (data.isMatch) {
-      // Stark glow för match
-      boxShadow =
-        "0 0 0 3px rgba(255, 255, 0, 0.8), 0 0 20px rgba(255, 255, 0, 0.6)";
-    } else if (data.isConnected) {
-      // Mild glow för kopplade
-      boxShadow =
-        "0 0 0 2px rgba(180, 120, 255, 0.6), 0 0 12px rgba(180, 120, 255, 0.4)";
-    } else {
-      boxShadow = "none"; // Ingen skugga för övriga vid sökning
-    }
+    // Logik för sök-glow kan läggas till här om önskat
   }
 
-  return (
+  // Header Actions (Knappar)
+  const headerActions = (
+    <>
+      {/* Tag Button */}
+      <div
+        className="nodrag"
+        onClick={(e) => {
+          e.stopPropagation();
+          setShowTagMenu(!showTagMenu);
+          setShowMagicMenu(false);
+        }}
+        style={{
+          width: 34,
+          height: 34,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          cursor: "pointer",
+          borderRadius: 4,
+          background: showTagMenu ? "rgba(255,255,255,0.1)" : "transparent",
+        }}
+        title="Taggar"
+      >
+        <Tag size={22} color={data.color || "#6366f1"} />
+      </div>
+
+      {/* Magic Button (AI) */}
+      <div
+        className="nodrag"
+        onClick={(e) => {
+          e.stopPropagation();
+          setShowMagicMenu(!showMagicMenu);
+          setShowTagMenu(false);
+        }}
+        onMouseDown={(e) => {
+          e.stopPropagation();
+          e.preventDefault();
+        }}
+        style={{
+          width: 34,
+          height: 34,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          cursor: "pointer",
+          borderRadius: 4,
+          background: showMagicMenu ? "rgba(255,255,255,0.1)" : "transparent",
+        }}
+        title="Städa, rätta & strukturera ✨"
+      >
+        {data.isProcessing ? (
+          <Loader2 size={22} className="animate-spin" color="#6366f1" />
+        ) : (
+          <Sparkles size={22} color="#6366f1" fill="none" />
+        )}
+      </div>
+
+      {/* Delete Button */}
+      <div
+        className="nodrag"
+        onClick={(e) => {
+          e.stopPropagation();
+          data.onDelete?.(id);
+        }}
+        style={{
+          width: 34,
+          height: 34,
+          borderRadius: 4,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          cursor: "pointer",
+          color: "#ef4444",
+        }}
+        title="Ta bort"
+      >
+        <X size={24} />
+      </div>
+    </>
+  );
+
+  // Title Component
+  const titleComponent = isEditingTitle ? (
+    <input
+      className="nodrag"
+      autoFocus
+      value={title}
+      onChange={(e) => setTitle(e.target.value)}
+      onBlur={() => {
+        data.onTitleChange?.(id, title);
+        setIsEditingTitle(false);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          data.onTitleChange?.(id, title);
+          setIsEditingTitle(false);
+        }
+      }}
+      placeholder="Rubrik..."
+      style={{
+        width: "100%",
+        background: "transparent",
+        border: "none",
+        outline: "none",
+        fontSize: 30,
+        fontWeight: 600,
+        color: "inherit",
+        padding: 0,
+        margin: 0,
+      }}
+    />
+  ) : (
     <div
+      onClick={(e) => {
+        e.stopPropagation();
+        setIsEditingTitle(true);
+      }}
+      style={{
+        width: "100%",
+        fontSize: 30,
+        fontWeight: 600,
+        color: title ? "inherit" : "rgba(255,255,255,0.4)",
+        cursor: "text",
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+      }}
+    >
+      {title || "Rubrik..."}
+    </div>
+  );
+
+  return (
+    <BaseNode
+      id={id}
       ref={containerRef}
+      selected={selected}
+      title={titleComponent}
+      icon={<FileText size={24} />}
+      headerActions={headerActions}
+      accentColor={data.color || "#6366f1"} // 🔥 Använd vald färg för border/glow
       onDoubleClick={(e) => {
         e.stopPropagation();
         data.onStartEditing(id);
       }}
       style={{
-        minWidth: 300,
-        minHeight: 150,
         width: "100%",
         height: "100%",
-        padding: "16px",
-        borderRadius: 16,
-        background: data.color ?? "#f1f1f1",
-        border: selected ? "2px solid #6366f1" : "1px solid rgba(0,0,0,0.1)",
-        boxShadow: boxShadow,
-        boxSizing: "border-box",
-        position: "relative",
-        display: "flex",
-        flexDirection: "column",
-        overflow: "visible", // Viktigt för att glow ska synas utanför
-        touchAction: "none", // 🔥 FIX: Förhindra browser-zoom/pan på noden
-        willChange: "width, height", // 🔥 FIX: Hint till webbläsaren för prestanda
         zIndex: 50, // 🔥 FIX: Se till att resizer ligger överst
+        // Problem 1: Tydligare border och glow hanteras nu av BaseNode via accentColor
       }}
     >
-      {/* Tags Display (Top Left Label) */}
-      {((data.tags && data.tags.length > 0) ||
-        (data.aiTags && data.aiTags.length > 0)) && (
-        <div
-          className="nodrag"
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 16,
-            display: "flex",
-            gap: 4,
-            zIndex: 5,
-            flexWrap: "wrap",
-            maxWidth: "100%",
-            pointerEvents: "none",
-          }}
-        >
-          {data.tags?.map((tag, i) => (
-            <div
-              key={i}
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleTag(tag);
-              }}
-              style={{
-                fontSize: "10px",
-                fontWeight: 600,
-                background: getTagColor(tag),
-                color: "white",
-                padding: "2px 6px 2px 8px",
-                borderRadius: "12px",
-                display: "flex",
-                alignItems: "center",
-                gap: 3,
-                boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
-                border: "1px solid rgba(255,255,255,0.2)",
-                cursor: "pointer",
-                pointerEvents: "auto",
-              }}
-              title="Klicka för att ta bort"
-            >
-              <Tag size={8} strokeWidth={3} />
-              {tag}
-              <X size={8} strokeWidth={3} style={{ opacity: 0.7 }} />
-            </div>
-          ))}
-
-          {/* 🔥 NY: Visa AI-taggar */}
-          {data.aiTags?.map((tag, i) => (
-            <div
-              key={`ai-${i}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                approveAiTag(tag);
-              }}
-              style={{
-                fontSize: "10px",
-                fontWeight: 600,
-                background: "transparent",
-                color: getTagColor(tag),
-                padding: "2px 6px 2px 6px",
-                borderRadius: "12px",
-                display: "flex",
-                alignItems: "center",
-                gap: 3,
-                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-                border: `1px dashed ${getTagColor(tag)}`, // Streckad kant för AI
-                cursor: "pointer",
-                pointerEvents: "auto",
-              }}
-              title="Klicka för att godkänna (flytta till vanliga taggar)"
-            >
-              <Sparkles size={8} strokeWidth={3} />
-              {tag}
-              <div
-                onClick={(e) => {
-                  e.stopPropagation();
-                  deleteAiTag(tag);
-                }}
-                style={{ display: "flex", alignItems: "center" }}
-              >
-                <X size={8} strokeWidth={3} style={{ opacity: 0.7 }} />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
       <NodeResizer
         isVisible={selected} // Visa bara handles när noden är vald (snyggare)
         minWidth={300}
@@ -512,72 +530,13 @@ export default function NoteNode({
         }}
       />
 
-      {/* Titel-input */}
-      {/* 🔥 FIX: Wrapper för att skydda titeln från att täckas av editorn */}
-      <div
-        style={{
-          position: "relative",
-          zIndex: 10,
-          marginBottom: 8,
-          flexShrink: 0, // Förhindra att titeln krymper
-        }}
-      >
-        {isEditingTitle ? (
-          <input
-            className="nodrag"
-            autoFocus
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onBlur={() => {
-              data.onTitleChange?.(id, title);
-              setIsEditingTitle(false);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                data.onTitleChange?.(id, title);
-                setIsEditingTitle(false);
-              }
-            }}
-            placeholder="Rubrik..."
-            style={{
-              width: "100%",
-              background: "transparent",
-              border: "none",
-              outline: "none",
-              fontSize: 16,
-              fontWeight: "bold",
-              color: "#111",
-              textAlign: "center",
-            }}
-          />
-        ) : (
-          <div
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsEditingTitle(true);
-            }}
-            style={{
-              width: "100%",
-              fontSize: 16,
-              fontWeight: "bold",
-              color: title ? "#111" : "#888",
-              textAlign: "center",
-              cursor: "text",
-              minHeight: "24px",
-              // Ingen 'nodrag' här, så det går att dra i rubriken!
-            }}
-          >
-            {title || "Rubrik..."}
-          </div>
-        )}
-      </div>
-
-      {/* Färgpalett (visas när vald) */}
+      {/* Problem 2: Färgprickar flyttade till egen rad ovanför headern */}
       {selected && (
         <div
+          className="nodrag"
           style={{
             position: "absolute",
-            top: -35,
+            top: -40, // Flyttad upp ovanför headern
             left: 0,
             display: "flex",
             gap: 6,
@@ -595,40 +554,16 @@ export default function NoteNode({
                 width: 24,
                 height: 24,
                 borderRadius: "50%",
-                background: c,
+                background: c, // Behåll originalfärgerna för paletten
                 cursor: "pointer",
                 border:
-                  data.color === c ? "2px solid #6366f1" : "1px solid #999",
+                  data.color === c
+                    ? "2px solid #fff"
+                    : "1px solid rgba(255,255,255,0.2)",
                 boxShadow: "0 2px 5px rgba(0,0,0,0.1)",
               }}
             />
           ))}
-        </div>
-      )}
-
-      {/* Tag Button */}
-      {selected && (
-        <div
-          onClick={(e) => {
-            e.stopPropagation();
-            setShowTagMenu(!showTagMenu);
-            setShowMagicMenu(false);
-          }}
-          style={{
-            position: "absolute",
-            top: 2,
-            right: 46, // Till vänster om Magic-knappen
-            width: 16,
-            height: 16,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            cursor: "pointer",
-            zIndex: 10,
-          }}
-          title="Taggar"
-        >
-          <Tag size={14} color="#6366f1" />
         </div>
       )}
 
@@ -639,21 +574,34 @@ export default function NoteNode({
           onClick={(e) => e.stopPropagation()}
           style={{
             position: "absolute",
-            top: 24,
-            right: 0,
-            width: 200,
-            background: "#222",
-            border: "1px solid #444",
-            borderRadius: 8,
-            padding: 8,
-            zIndex: 20,
-            boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+            top: 50,
+            right: -10,
+            width: 240,
+            background: "rgba(30, 30, 35, 0.95)",
+            backdropFilter: "blur(12px)",
+            border: "1px solid rgba(255, 255, 255, 0.1)",
+            borderRadius: 12,
+            padding: 12,
+            zIndex: 100,
+            boxShadow: "0 10px 30px -5px rgba(0,0,0,0.6)",
             display: "flex",
             flexDirection: "column",
-            gap: 8,
+            gap: 12,
+            animation: "fadeIn 0.2s ease-out",
           }}
         >
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: "#888",
+              textTransform: "uppercase",
+              letterSpacing: 0.5,
+            }}
+          >
+            Hantera Taggar
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             {DEFAULT_TAGS.map((tag) => {
               const isActive = data.tags?.includes(tag);
               return (
@@ -661,16 +609,29 @@ export default function NoteNode({
                   key={tag}
                   onClick={() => toggleTag(tag)}
                   style={{
-                    fontSize: "11px",
-                    padding: "4px 8px",
-                    borderRadius: 12,
+                    fontSize: "12px",
+                    padding: "6px 10px",
+                    borderRadius: 8,
                     cursor: "pointer",
-                    background: isActive ? getTagColor(tag) : "#333",
+                    background: isActive
+                      ? getTagColor(tag)
+                      : "rgba(255,255,255,0.05)",
                     color: isActive ? "white" : "#ccc",
                     border: isActive
                       ? `1px solid ${getTagColor(tag)}`
-                      : "1px solid #555",
-                    transition: "all 0.1s",
+                      : "1px solid rgba(255,255,255,0.1)",
+                    transition: "all 0.2s",
+                    fontWeight: 500,
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isActive)
+                      e.currentTarget.style.background =
+                        "rgba(255,255,255,0.1)";
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isActive)
+                      e.currentTarget.style.background =
+                        "rgba(255,255,255,0.05)";
                   }}
                 >
                   {tag}
@@ -678,19 +639,26 @@ export default function NoteNode({
               );
             })}
           </div>
-          <div style={{ display: "flex", gap: 4 }}>
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              borderTop: "1px solid rgba(255,255,255,0.1)",
+              paddingTop: 12,
+            }}
+          >
             <input
               value={customTag}
               onChange={(e) => setCustomTag(e.target.value)}
-              placeholder="Ny tagg..."
+              placeholder="Skapa ny tagg..."
               style={{
                 flex: 1,
-                background: "#111",
-                border: "1px solid #444",
+                background: "rgba(0,0,0,0.3)",
+                border: "1px solid rgba(255,255,255,0.1)",
                 color: "white",
-                fontSize: "12px",
-                padding: "4px 8px",
-                borderRadius: 4,
+                fontSize: "13px",
+                padding: "8px 12px",
+                borderRadius: 8,
                 outline: "none",
               }}
               onKeyDown={(e) => {
@@ -700,53 +668,27 @@ export default function NoteNode({
             <button
               onClick={addCustomTag}
               style={{
-                background: "#444",
+                background: "#6366f1",
                 border: "none",
                 color: "white",
-                borderRadius: 4,
+                borderRadius: 8,
                 cursor: "pointer",
-                padding: "0 8px",
+                padding: "0 10px",
                 display: "flex",
                 alignItems: "center",
+                justifyContent: "center",
+                transition: "background 0.2s",
               }}
+              onMouseEnter={(e) =>
+                (e.currentTarget.style.background = "#4f46e5")
+              }
+              onMouseLeave={(e) =>
+                (e.currentTarget.style.background = "#6366f1")
+              }
             >
-              <Plus size={14} />
+              <Plus size={16} />
             </button>
           </div>
-        </div>
-      )}
-
-      {/* Magic Button (AI) */}
-      {selected && (
-        <div
-          onClick={(e) => {
-            e.stopPropagation();
-            setShowMagicMenu(!showMagicMenu);
-            setShowTagMenu(false);
-          }}
-          onMouseDown={(e) => {
-            e.stopPropagation();
-            e.preventDefault(); // 🔥 FIX: Förhindra fokus-stöld
-          }}
-          style={{
-            position: "absolute",
-            top: 2,
-            right: 24, // Till vänster om krysset
-            width: 16,
-            height: 16,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            cursor: "pointer",
-            zIndex: 10,
-          }}
-          title="Städa, rätta & strukturera ✨"
-        >
-          {data.isProcessing ? (
-            <Loader2 size={14} className="animate-spin" color="#6366f1" />
-          ) : (
-            <Sparkles size={14} color="#6366f1" fill="none" />
-          )}
         </div>
       )}
 
@@ -757,20 +699,36 @@ export default function NoteNode({
           onClick={(e) => e.stopPropagation()}
           style={{
             position: "absolute",
-            top: 24,
-            right: 0,
-            width: 180,
-            background: "#222",
-            border: "1px solid #444",
-            borderRadius: 8,
-            padding: 4,
-            zIndex: 20,
-            boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+            top: 50,
+            right: -10,
+            width: 220,
+            background: "rgba(30, 30, 35, 0.95)",
+            backdropFilter: "blur(12px)",
+            border: "1px solid rgba(255, 255, 255, 0.1)",
+            borderRadius: 12,
+            padding: 8,
+            zIndex: 100,
+            boxShadow: "0 10px 30px -5px rgba(0,0,0,0.6)",
             display: "flex",
             flexDirection: "column",
-            gap: 2,
+            gap: 4,
+            animation: "fadeIn 0.2s ease-out",
           }}
         >
+          <div
+            style={{
+              padding: "4px 8px",
+              fontSize: 11,
+              fontWeight: 700,
+              color: "#888",
+              textTransform: "uppercase",
+              letterSpacing: 0.5,
+              marginBottom: 4,
+            }}
+          >
+            AI Assistent
+          </div>
+
           <div
             onClick={() => {
               data.onMagic?.(id, "organize");
@@ -779,21 +737,42 @@ export default function NoteNode({
             style={{
               display: "flex",
               alignItems: "center",
-              gap: 8,
-              padding: "8px",
-              fontSize: "12px",
-              color: "#eee",
+              gap: 12,
+              padding: "10px",
               cursor: "pointer",
-              borderRadius: 4,
-              transition: "background 0.1s",
+              borderRadius: 8,
+              transition: "all 0.2s",
+              background: "transparent",
             }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = "#333")}
+            onMouseEnter={(e) =>
+              (e.currentTarget.style.background = "rgba(255,255,255,0.05)")
+            }
             onMouseLeave={(e) =>
               (e.currentTarget.style.background = "transparent")
             }
           >
-            <Wand2 size={14} color="#6366f1" />
-            <span>Städa text</span>
+            <div
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 8,
+                background: "rgba(99, 102, 241, 0.15)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#6366f1",
+              }}
+            >
+              <Wand2 size={16} />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#eee" }}>
+                Strukturera
+              </span>
+              <span style={{ fontSize: 11, color: "#888" }}>
+                Städa & formatera text
+              </span>
+            </div>
           </div>
           <div
             onClick={() => {
@@ -803,48 +782,43 @@ export default function NoteNode({
             style={{
               display: "flex",
               alignItems: "center",
-              gap: 8,
-              padding: "8px",
-              fontSize: "12px",
-              color: "#eee",
+              gap: 12,
+              padding: "10px",
               cursor: "pointer",
-              borderRadius: 4,
-              transition: "background 0.1s",
+              borderRadius: 8,
+              transition: "all 0.2s",
+              background: "transparent",
             }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = "#333")}
+            onMouseEnter={(e) =>
+              (e.currentTarget.style.background = "rgba(255,255,255,0.05)")
+            }
             onMouseLeave={(e) =>
               (e.currentTarget.style.background = "transparent")
             }
           >
-            <FileText size={14} color="#10b981" />
-            <span>Analysera</span>
+            <div
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 8,
+                background: "rgba(16, 185, 129, 0.15)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#10b981",
+              }}
+            >
+              <FileText size={16} />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#eee" }}>
+                Analysera
+              </span>
+              <span style={{ fontSize: 11, color: "#888" }}>
+                Sammanfatta & tagga
+              </span>
+            </div>
           </div>
-        </div>
-      )}
-
-      {selected && (
-        <div
-          onClick={(e) => {
-            e.stopPropagation();
-            data.onDelete?.(id);
-          }}
-          style={{
-            position: "absolute",
-            top: 2,
-            right: 2,
-            width: 16,
-            height: 16,
-            borderRadius: 3,
-            background: "transparent",
-            color: "#111",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            cursor: "pointer",
-            zIndex: 10, // Se till att krysset ligger överst
-          }}
-        >
-          <X size={14} />
         </div>
       )}
 
@@ -867,6 +841,7 @@ export default function NoteNode({
         />
       )}
 
+      {/* Problem 3: Handles positioneras nu relativt BaseNode (hela noden) */}
       <SmartHandle
         id="top"
         type="source"
@@ -896,109 +871,174 @@ export default function NoteNode({
         selected={selected}
       />
 
-      {/* 🔥 FIX: innerRef är nu en transparent wrapper för både editor och summary */}
+      {/* 🔥 NY: Content Wrapper som vi mäter på */}
       <div
-        ref={innerRef}
+        ref={contentRef}
         style={{
           display: "flex",
           flexDirection: "column",
-          position: "relative",
-          zIndex: 1,
-          width: "100%", // 🔥 FIX: Säkerställ att den fyller bredden
-          flex: 1, // 🔥 FIX: Fyll ut vertikalt utrymme i noden
-          minHeight: 0, // Viktigt för flex-nesting
+          width: "100%",
+          flex: 1,
+          padding: "16px", // Padding inuti content area
+          boxSizing: "border-box", // 🔥 FIX: Se till att padding inte spräcker bredden
         }}
       >
-        {/* 🔥 NY: Content Wrapper som vi mäter på */}
-        <div
-          ref={contentRef}
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            width: "100%",
-            flex: 1, // 🔥 FIX: Låt denna växa också
-            flexShrink: 0, // 🔥 FIX: Förhindra krympning
-          }}
-        >
-          {/* Editor Container (Mörk ruta) */}
+        {/* Tags Display (Top of content) */}
+        {((data.tags && data.tags.length > 0) ||
+          (data.aiTags && data.aiTags.length > 0)) && (
           <div
+            className="nodrag"
             style={{
-              background: "#3a3a3a",
-              borderRadius: 12,
-              padding: 12,
-              color: "white",
               display: "flex",
-              flexDirection: "column",
-              minHeight: "60px", // Minsta höjd för editorn
-              flex: 1, // 🔥 FIX: Låt editorn växa och fylla utrymmet (knuffar ner summary)
-              flexShrink: 0, // 🔥 FIX: Förhindra krympning
+              gap: 4,
+              flexWrap: "wrap",
+              marginBottom: 12,
+              pointerEvents: "auto",
             }}
           >
-            <RichTextEditor
-              content={value}
-              isEditing={!!data.isEditing}
-              startListeningOnMount={!!data.startListening}
-              onImageUpload={handleImageUpload}
-              onChange={(html) => {
-                setValue(html);
-                data.onChange(id, html);
-              }}
-              onBlur={stopEdit}
-            />
-
-            {/* 🔥 FIX: Sammanfattning flyttad INUTI den mörka rutan */}
-            {data.summary && (
+            {data.tags?.map((tag, i) => (
               <div
-                className="summary-container"
-                style={{
-                  marginTop: 12,
-                  paddingTop: 12,
-                  borderTop: "1px solid rgba(255, 255, 255, 0.1)",
-                  fontSize: "13px",
-                  color: "#ccc",
-                  fontStyle: "italic",
-                  position: "relative",
-                  lineHeight: "1.5",
+                key={i}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleTag(tag);
                 }}
+                style={{
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  background: getTagColor(tag),
+                  color: "white",
+                  padding: "2px 6px 2px 8px",
+                  borderRadius: "12px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 3,
+                  boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
+                  border: "1px solid rgba(255,255,255,0.2)",
+                  cursor: "pointer",
+                }}
+                title="Klicka för att ta bort"
               >
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 6,
-                    marginBottom: 4,
-                    alignItems: "center",
-                    color: "#6366f1",
-                    fontWeight: 600,
-                    fontSize: "11px",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  <Sparkles size={12} />
-                  AI Sammanfattning
-                </div>
-                {data.summary}
+                <Tag size={8} strokeWidth={3} />
+                {tag}
+                <X size={8} strokeWidth={3} style={{ opacity: 0.7 }} />
+              </div>
+            ))}
+
+            {/* 🔥 NY: Visa AI-taggar */}
+            {data.aiTags?.map((tag, i) => (
+              <div
+                key={`ai-${i}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  approveAiTag(tag);
+                }}
+                style={{
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  background: "transparent",
+                  color: getTagColor(tag),
+                  padding: "2px 6px 2px 6px",
+                  borderRadius: "12px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 3,
+                  boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                  border: `1px dashed ${getTagColor(tag)}`, // Streckad kant för AI
+                  cursor: "pointer",
+                }}
+                title="Klicka för att godkänna (flytta till vanliga taggar)"
+              >
+                <Sparkles size={8} strokeWidth={3} />
+                {tag}
                 <div
                   onClick={(e) => {
                     e.stopPropagation();
-                    data.onSummaryChange?.(id, "");
+                    deleteAiTag(tag);
                   }}
-                  style={{
-                    position: "absolute",
-                    top: 12,
-                    right: 0,
-                    cursor: "pointer",
-                    opacity: 0.6,
-                    padding: 4,
-                  }}
-                  title="Ta bort sammanfattning"
+                  style={{ display: "flex", alignItems: "center" }}
                 >
-                  <X size={14} />
+                  <X size={8} strokeWidth={3} style={{ opacity: 0.7 }} />
                 </div>
               </div>
-            )}
+            ))}
           </div>
+        )}
+
+        {/* Editor Container (Transparent nu) */}
+        <div
+          style={{
+            color: "white",
+            display: "flex",
+            flexDirection: "column",
+            minHeight: "60px",
+            flex: 1,
+          }}
+        >
+          <RichTextEditor
+            content={value}
+            isEditing={!!data.isEditing}
+            startListeningOnMount={!!data.startListening}
+            onImageUpload={handleImageUpload}
+            onChange={(html) => {
+              setValue(html);
+              data.onChange(id, html);
+            }}
+            onBlur={stopEdit}
+          />
+
+          {/* 🔥 FIX: Sammanfattning */}
+          {data.summary && (
+            <div
+              className="summary-container"
+              style={{
+                marginTop: 12,
+                paddingTop: 12,
+                borderTop: "1px solid rgba(255, 255, 255, 0.1)",
+                fontSize: "15px",
+                color: "#ccc",
+                fontStyle: "italic",
+                position: "relative",
+                lineHeight: "1.5",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  gap: 6,
+                  marginBottom: 4,
+                  alignItems: "center",
+                  color: "#6366f1",
+                  fontWeight: 600,
+                  fontSize: "12px",
+                  textTransform: "uppercase",
+                }}
+              >
+                <Sparkles size={12} />
+                AI Sammanfattning
+              </div>
+              {data.summary}
+              <div
+                onClick={(e) => {
+                  e.stopPropagation();
+                  data.onSummaryChange?.(id, "");
+                }}
+                style={{
+                  position: "absolute",
+                  top: 12,
+                  right: 0,
+                  cursor: "pointer",
+                  opacity: 0.6,
+                  padding: 4,
+                }}
+                title="Ta bort sammanfattning"
+              >
+                <X size={14} />
+              </div>
+            </div>
+          )}
         </div>
       </div>
-    </div>
+    </BaseNode>
   );
 }

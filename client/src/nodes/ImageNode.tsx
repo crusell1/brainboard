@@ -7,6 +7,7 @@ import {
   useUpdateNodeInternals,
 } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
+import { X } from "lucide-react";
 
 export type ImageNodeData = {
   src: string;
@@ -79,7 +80,9 @@ export default function ImageNode({
   const updateNodeInternals = useUpdateNodeInternals();
 
   useEffect(() => {
-    updateNodeInternals(id);
+    requestAnimationFrame(() => {
+      updateNodeInternals(id);
+    });
   }, [id, updateNodeInternals]);
 
   return (
@@ -89,8 +92,8 @@ export default function ImageNode({
         width: "100%",
         height: "auto", // Låt innehållet styra höjden igen
         borderRadius: 12,
-        border: selected ? "2px solid #6366f1" : "2px solid transparent",
-        boxShadow: selected ? "0 0 15px rgba(99, 102, 241, 0.4)" : "none",
+        border: selected ? "4px solid #6366f1" : "4px solid transparent",
+        boxShadow: selected ? "0 0 25px rgba(99, 102, 241, 0.3)" : "none",
         transition: "all 0.2s ease",
         background: "transparent",
         lineHeight: 0, // Tar bort extra utrymme under bilden
@@ -229,25 +232,26 @@ export default function ImageNode({
           }}
           style={{
             position: "absolute",
-            top: -10,
-            right: -10,
-            width: 24, // Mindre och diskretare
-            height: 24,
-            borderRadius: "50%",
-            background: "#ff0055",
+            top: -12,
+            right: -12,
+            width: 28,
+            height: 28,
+            borderRadius: "8px",
+            background: "#ef4444",
             color: "white",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             cursor: "pointer",
-            boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
             zIndex: 100,
-            fontSize: "16px",
-            lineHeight: 1,
-            border: "2px solid #fff",
+            border: "2px solid #1e1e24",
+            transition: "transform 0.1s",
           }}
+          onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.1)")}
+          onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
         >
-          ✕
+          <X size={16} strokeWidth={3} />
         </div>
       )}
     </div>

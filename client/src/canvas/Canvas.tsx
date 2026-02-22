@@ -19,6 +19,7 @@ import type { Note, DbEdge, DbDrawing } from "../types/database";
 import NoteNode, { type NoteData } from "../nodes/NoteNode";
 import ImageNode from "../nodes/ImageNode";
 import PomodoroNode from "../pomodoro/PomodoroNode"; // 🔥 Importera PomodoroNode
+import LinkNode from "../nodes/LinkNode"; // 🔥 Importera LinkNode
 import RadialMenu from "../components/RadialMenu";
 import DrawingLayer from "../components/DrawingLayer";
 import CursorLayer from "../components/CursorLayer"; // 🔥 Importera CursorLayer
@@ -70,29 +71,73 @@ type CursorState = { x: number; y: number; email: string; color: string };
 
 // 🔥 NY: Helper för smartare AI-instruktioner (Heuristik för struktur)
 const getSmartCleanupInstructions = (content: string): string => {
-  // 1. Normalisera text för analys (ta bort HTML-taggar grovt för att hitta nyckelord)
-  const text = content.replace(/<[^>]*>/g, " ").toLowerCase();
+  // 1. Normalisera text för analys (ta bort HTML-taggar)
+  const text = content.replace(/<[^>]*>/g, " ").trim();
+  const lowerText = text.toLowerCase();
 
-  // 2. Heuristik för Numrerad Lista (Sekvens / Instruktion)
-  const isSequential =
-    /\b(steg|först|sen|därefter|till sist|ordning|prioritet)\b/.test(text) ||
-    /\b\d+[.)]/.test(text) || // Matchar "1." eller "1)"
-    /\b[a-z][.)]/.test(text); // Matchar "a." eller "a)"
+  // 2. Intent Detection (Regex för explicita kommandon i slutet)
+  // Matchar t.ex: "gör en lista", "sammanfatta detta", "dela upp i kategorier"
+  const commandRegex =
+    /(?:gör|skapa|omvandla|dela|sammanfatta)\s+.*?(?:lista|punktlista|rubriker|kategorier|sammanfattning|punkter).*$/i;
+  const commandMatch = text.match(commandRegex);
 
-  // 3. Heuristik för Rubriker (Sektioner / Strukturerad data)
-  const hasHeaders =
-    /\b(problem|mål|krav|idéer|sammanfattning|fördelar|nackdelar|slutsats):/.test(
-      text,
-    );
+  let specificInstruction = "";
+  let ignoreCommandInstruction = "";
 
-  // 4. Heuristik för TODOs / Checklistor
-  const isTodo =
-    /\b(todo|att göra|kom ihåg|checklista)\b/.test(text) ||
-    /\[\s*\]/.test(text) || // Matchar "[ ]"
-    /- \[ \]/.test(text);
+  if (commandMatch) {
+    const command = commandMatch[0];
+    // Instruera LLM att ignorera kommandot i outputen
+    ignoreCommandInstruction = `
+    OBS: Texten slutar med instruktionen: "${command}". 
+    Följ denna instruktion för strukturen, men EXKLUDERA själva instruktionstexten från resultatet.
+    `;
 
-  // 5. Bygg dynamiska instruktioner
-  let instructions = `
+    if (/lista|punkter|punktlista/i.test(command)) {
+      specificInstruction =
+        "Formatera innehållet som en tydlig PUNKTLISTA (<ul>).";
+    } else if (/rubriker/i.test(command)) {
+      specificInstruction =
+        "Dela upp innehållet under beskrivande RUBRIKER (<h3>).";
+    } else if (/kategorier/i.test(command)) {
+      specificInstruction =
+        "Gruppera innehållet i 3-5 logiska KATEGORIER med rubriker (<h3>).";
+    } else if (/sammanfattning/i.test(command)) {
+      specificInstruction =
+        "Skriv en kort och kärnfull SAMMANFATTNING av innehållet (<p>).";
+    }
+  } else {
+    // 3. Implicit Heuristics (om inget kommando finns)
+
+    // Uppräkning (många kommatecken eller 'och')
+    const commaCount = (text.match(/,/g) || []).length;
+    const andCount = (lowerText.match(/\boch\b/g) || []).length;
+    const isEnumeration = commaCount > 3 || andCount > 3;
+
+    // Planering / Att-göra
+    const isPlanning =
+      /\b(att göra|måste|ska|borde|fixa|plan|todo|kom ihåg)\b/i.test(lowerText);
+
+    // Reflektion
+    const isReflection =
+      /\b(känner|tror|tycker|upplever|insikt|lärdom|tanke)\b/i.test(lowerText);
+
+    if (isEnumeration) {
+      specificInstruction =
+        "Texten innehåller uppräkningar. Formatera som en PUNKTLISTA (<ul>).";
+    } else if (isPlanning) {
+      specificInstruction =
+        "Texten verkar vara planering. Dela upp i rubriker som 'Att göra', 'Måsten' eller 'Övrigt'.";
+    } else if (isReflection) {
+      specificInstruction =
+        "Texten verkar vara reflektioner. Dela upp i rubriker som 'Tankar', 'Insikter' eller 'Nästa steg'.";
+    } else {
+      // Default: Blandat / Ostrukturerat
+      specificInstruction =
+        "Gruppera innehållet i 3-5 logiska KATEGORIER med rubriker (<h3>) för att skapa struktur.";
+    }
+  }
+
+  return `
     Du är en expert på att strukturera anteckningar.
     Din uppgift: Städa upp texten, rätta stavfel, förbättra grammatik och applicera tydlig struktur.
     
@@ -101,39 +146,13 @@ const getSmartCleanupInstructions = (content: string): string => {
     2. Håll texten kompakt och lättläst (max 6-10 rader om möjligt).
     3. Behåll viktig information, ändra inte betydelsen.
     4. Använd svenska.
-  `;
+    ${ignoreCommandInstruction}
 
-  if (hasHeaders) {
-    instructions += `
     STRUKTUR:
-    - Texten innehåller tydliga sektioner (t.ex. Problem, Mål). 
-    - Använd <strong> eller <h3> för dessa rubriker.
-    - Gruppera innehållet under respektive rubrik med punktlistor (<ul>) eller paragrafer (<p>).
-    `;
-  } else if (isSequential) {
-    instructions += `
-    STRUKTUR:
-    - Texten är en sekvens, instruktion eller rangordning.
-    - Formatera som en NUMRERAD lista (<ol>).
-    - Varje steg ska vara tydligt och kortfattat.
-    `;
-  } else if (isTodo) {
-    instructions += `
-    STRUKTUR:
-    - Texten är en checklista eller TODO-lista.
-    - Formatera som en punktlista (<ul>).
-    - Inled gärna punkter med "Att göra:" om det passar.
-    `;
-  } else {
-    instructions += `
-    STRUKTUR:
-    - Om texten är en uppradning av saker/idéer: Använd PUNKTLISTA (<ul>).
-    - Om texten är löpande: Dela upp i korta stycken (<p>).
-    - Prioritera listor för läsbarhet framför långa stycken.
-    `;
-  }
-
-  return instructions.trim();
+    ${specificInstruction}
+    
+    Använd <h3> för rubriker, <ul> för listor och <p> för löpande text.
+  `.trim();
 };
 
 export default function Canvas() {
@@ -141,7 +160,12 @@ export default function Canvas() {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
   const nodeTypes = useMemo(
-    () => ({ note: NoteNode, image: ImageNode, pomodoro: PomodoroNode }),
+    () => ({
+      note: NoteNode,
+      image: ImageNode,
+      pomodoro: PomodoroNode,
+      link: LinkNode,
+    }),
     [],
   ); // 🔥 Registrera pomodoro
 
@@ -163,6 +187,7 @@ export default function Canvas() {
   const clickTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showShareModal, setShowShareModal] = useState(false); // 🔥 State för ShareModal
   const [showUrlModal, setShowUrlModal] = useState(false); // 🔥 State för ImageUrlModal
+  const [urlModalMode, setUrlModalMode] = useState<"image" | "link">("image"); // 🔥 NY: Håll koll på vad vi skapar
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false); // 🔥 State för ConfirmModal
   const [userEmail, setUserEmail] = useState(""); // 🔥 State för användarens email
   const [isEditingBoardName, setIsEditingBoardName] = useState(false); // 🔥 State för namnbyte
@@ -217,6 +242,13 @@ export default function Canvas() {
   // 🔥 NY: Håll koll på vilka noder användaren interagerar med just nu (drag/resize)
   // Detta förhindrar att inkommande DB-uppdateringar skriver över lokala pågående ändringar (jitter/loopar).
   const interactingNodeIds = useRef<Set<string>>(new Set());
+
+  // 🔥 Ref för att hålla koll på om någon nod är vald (för att förhindra att menyn öppnas vid avmarkering)
+  const isAnyNodeSelected = useRef(false);
+
+  useEffect(() => {
+    isAnyNodeSelected.current = nodes.some((n) => n.selected);
+  }, [nodes]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -413,20 +445,31 @@ export default function Canvas() {
           type: n.type || "note", // Använd typ från DB
           position: { x: n.position_x, y: n.position_y },
           style: {
-            width: n.width ?? (n.type === "pomodoro" ? 300 : NODE_WIDTH),
-            height:
-              n.height ??
-              (n.type === "image"
+            width:
+              n.type === "link"
                 ? undefined
-                : n.type === "pomodoro"
-                  ? 400
-                  : NODE_HEIGHT),
+                : (n.width ?? (n.type === "pomodoro" ? 340 : NODE_WIDTH)), // 🔥 Uppdaterad default bredd
+            height:
+              n.type === "link"
+                ? undefined
+                : (n.height ??
+                  (n.type === "image"
+                    ? undefined
+                    : n.type === "pomodoro"
+                      ? 460 // 🔥 Uppdaterad default höjd
+                      : NODE_HEIGHT)),
           },
           data: {
             // Om det är en bild ligger URL:en i content, annars är content texten
             src: n.type === "image" ? n.content : undefined,
+            url: n.type === "link" ? n.content : undefined, // 🔥 Mappa URL för länkar
             title: n.title ?? "",
-            label: n.type === "image" ? "Bild" : n.content,
+            label:
+              n.type === "image"
+                ? "Bild"
+                : n.type === "link"
+                  ? "Länk"
+                  : n.content,
             color: n.color ?? "#f1f1f1",
             isEditing: false,
             tags: (n as any).tags || [],
@@ -438,6 +481,8 @@ export default function Canvas() {
             pausedTime: (n as any).paused_time,
             duration: (n as any).duration,
             plantId: (n as any).plant_id,
+            plantDna: (n as any).plant_dna, // 🔥 Ladda DNA från DB
+            currentFlower: (n as any).current_flower, // 🔥 FIX: Ladda currentFlower
             stats: (n as any).stats,
           },
         }));
@@ -669,6 +714,8 @@ export default function Canvas() {
                     pausedTime: (newNote as any).paused_time,
                     duration: (newNote as any).duration,
                     plantId: (newNote as any).plant_id,
+                    plantDna: (newNote as any).plant_dna, // 🔥 Synka DNA live
+                    currentFlower: (newNote as any).currentFlower, // 🔥 Synka currentFlower
                     stats: (newNote as any).stats,
                   },
                 } as Node,
@@ -715,6 +762,8 @@ export default function Canvas() {
                       pausedTime: (newNote as any).paused_time,
                       duration: (newNote as any).duration,
                       plantId: (newNote as any).plant_id,
+                      plantDna: (newNote as any).plant_dna, // 🔥 Synka DNA live
+                      currentFlower: (newNote as any).currentFlower, // 🔥 Synka currentFlower
                       stats: (newNote as any).stats,
                     },
                   };
@@ -858,7 +907,11 @@ export default function Canvas() {
 
       // Om det är en bild, spara URL (src) i content. Annars spara label (text).
       const contentToSave =
-        node.type === "image" ? node.data.src : node.data.label;
+        node.type === "image"
+          ? node.data.src
+          : node.type === "link"
+            ? node.data.url
+            : node.data.label;
 
       const { error } = await supabase.from("nodes").insert({
         id: node.id,
@@ -869,14 +922,17 @@ export default function Canvas() {
         position_y: node.position.y,
         content: contentToSave,
         title: node.data.title ?? "",
-        width: node.style?.width ?? NODE_WIDTH,
+        width:
+          node.type === "link" ? undefined : (node.style?.width ?? NODE_WIDTH),
         height:
-          node.style?.height ??
-          (node.type === "image"
+          node.type === "link"
             ? undefined
-            : node.type === "pomodoro"
-              ? 400
-              : NODE_HEIGHT),
+            : (node.style?.height ??
+              (node.type === "image"
+                ? undefined
+                : node.type === "pomodoro"
+                  ? 460 // 🔥 Uppdaterad default höjd vid skapande
+                  : NODE_HEIGHT)),
         color: node.data.color ?? "#f1f1f1",
         tags: node.data.tags || [],
         // 🔥 Spara Pomodoro-specifik data (kräver att DB-kolumner finns eller att vi använder en JSONB-kolumn 'data')
@@ -889,6 +945,8 @@ export default function Canvas() {
         paused_time: (node.data as any).pausedTime,
         duration: (node.data as any).duration,
         plant_id: (node.data as any).plantId,
+        plant_dna: (node.data as any).plantDna, // 🔥 Spara DNA till DB
+        current_flower: (node.data as any).currentFlower, // 🔥 FIX: Spara currentFlower
         stats: (node.data as any).stats,
       });
 
@@ -902,7 +960,11 @@ export default function Canvas() {
   const saveNodeToDb = useCallback(
     async (node: Node) => {
       const contentToSave =
-        node.type === "image" ? node.data.src : node.data.label;
+        node.type === "image"
+          ? node.data.src
+          : node.type === "link"
+            ? node.data.url
+            : node.data.label;
 
       const { data, error } = await supabase
         .from("nodes")
@@ -923,6 +985,8 @@ export default function Canvas() {
           paused_time: (node.data as any).pausedTime,
           duration: (node.data as any).duration,
           plant_id: (node.data as any).plantId,
+          plant_dna: (node.data as any).plantDna, // 🔥 Uppdatera DNA i DB
+          current_flower: (node.data as any).currentFlower, // 🔥 FIX: Uppdatera currentFlower
           stats: (node.data as any).stats,
           // Vi skickar med updated_at för att vara säkra på att Supabase ser ändringen
           updated_at: new Date().toISOString(),
@@ -1956,6 +2020,11 @@ export default function Canvas() {
         return;
       }
 
+      // 🔥 FIX: Om någon nod är vald, tolka klicket som avmarkering och öppna INTE menyn
+      if (isAnyNodeSelected.current) {
+        return;
+      }
+
       // Rensa eventuell existerande timer för att vara säker
       if (clickTimeoutRef.current) {
         clearTimeout(clickTimeoutRef.current);
@@ -2029,6 +2098,31 @@ export default function Canvas() {
       });
     },
     [reactFlowInstance, createNodeInDb, setNodes, edges, saveSnapshot],
+  );
+
+  // 🔥 NY: Hjälpfunktion för att skapa länknod
+  const createLinkNode = useCallback(
+    (url: string, x: number, y: number) => {
+      if (!reactFlowInstance) return;
+
+      const flowPosition = reactFlowInstance.screenToFlowPosition({ x, y });
+      const centeredPosition = {
+        x: flowPosition.x - 100,
+        y: flowPosition.y - 25,
+      };
+
+      const newLinkNode: Node = {
+        id: crypto.randomUUID(),
+        type: "link",
+        position: centeredPosition,
+        data: { url: url, title: url }, // Titel är URL som default
+      };
+
+      createNodeInDb(newLinkNode);
+      setNodes((nds) => [...nds, newLinkNode]);
+      saveSnapshot([...nodes, newLinkNode], edges);
+    },
+    [reactFlowInstance, createNodeInDb, setNodes, edges, saveSnapshot, nodes],
   );
 
   // 🔥 Hjälpfunktion för att ladda upp och skapa bildnod
@@ -2125,6 +2219,7 @@ export default function Canvas() {
   };
 
   const handleMenuSelect = (optionId: string) => {
+    console.log("Canvas: handleMenuSelect anropad med:", optionId);
     // Stäng menyn direkt
     setMenuState((prev) => ({ ...prev, isOpen: false }));
 
@@ -2139,8 +2234,11 @@ export default function Canvas() {
       return;
     }
 
-    if (optionId === "image-url") {
+    // 🔥 FIX: Hantera "link" explicit
+    if (optionId === "link") {
+      console.log("🔗 Canvas: Öppnar länk-modal");
       setShowUrlModal(true);
+      setUrlModalMode("link"); // 🔥 Sätt mode till länk
       return;
     }
 
@@ -2230,20 +2328,58 @@ export default function Canvas() {
         y: flowPosition.y - 100,
       };
 
-      const newNode: Node = {
-        id: crypto.randomUUID(),
-        type: "pomodoro", // 🔥 Vår nya typ
-        position: centeredPosition,
-        data: {
-          plantId: "sunflower",
-          status: "idle",
-          stats: { completed: 0, streak: 0, totalMinutes: 0 }, // 🔥 VIKTIGT: Initiera stats så DB inte klagar
-          duration: 25 * 60 * 1000, // 🔥 VIKTIGT: Initiera duration
-        },
-        style: { width: 300, height: 400 },
+      // 🔥 Hämta en slumpmässig blomma från DB direkt
+      const fetchRandomFlower = async () => {
+        const { data: flowers } = await supabase
+          .from("flower_definitions")
+          .select("*");
+
+        let selectedFlower = null;
+
+        if (flowers && flowers.length > 0) {
+          // Weighted random selection
+          const totalWeight = flowers.reduce(
+            (sum, f) => sum + f.drop_weight,
+            0,
+          );
+          let random = Math.random() * totalWeight;
+
+          for (const flower of flowers) {
+            random -= flower.drop_weight;
+            if (random <= 0) {
+              selectedFlower = flower;
+              break;
+            }
+          }
+        }
+
+        const newNode: Node = {
+          id: crypto.randomUUID(),
+          type: "pomodoro",
+          position: centeredPosition,
+          data: {
+            plantId: "stitchFlower",
+            status: "idle",
+            stats: { completed: 0, streak: 0, totalMinutes: 0 },
+            duration: 25 * 60 * 1000,
+            plantDna: selectedFlower?.dna, // Visuellt DNA
+            currentFlower: selectedFlower
+              ? {
+                  // 🔥 Spara info om blomman
+                  id: selectedFlower.id,
+                  name: selectedFlower.name,
+                  rarity: selectedFlower.rarity,
+                  description: selectedFlower.description,
+                }
+              : undefined,
+          },
+          style: { width: 340, height: 460 }, // 🔥 Uppdaterad storlek för nya noder
+        };
+        createNodeInDb(newNode);
+        setNodes((nds) => [...nds, newNode]);
       };
-      createNodeInDb(newNode);
-      setNodes((nds) => [...nds, newNode]);
+
+      fetchRandomFlower();
     }
 
     // Hantera AI-actions (Placeholder för framtida logik)
@@ -2278,6 +2414,7 @@ export default function Canvas() {
         position: "relative", // 🔥 FIX: Nödvändigt för att RadialMenu (absolute) ska positioneras korrekt relativt denna container
         touchAction: "none", // 🔥 FIX: Förhindrar att webbläsaren zoomar hela sidan på mobil (fixar hackig zoom)
         cursor: isDrawingMode ? "crosshair" : "default",
+        fontFamily: '"Inter", "Roboto", sans-serif',
       }}
     >
       <ReactFlow
@@ -2766,7 +2903,21 @@ export default function Canvas() {
       {/* 🔥 Image URL Modal */}
       {showUrlModal && (
         <ImageUrlModal
-          onConfirm={(url) => createImageNode(url, menuState.x, menuState.y)}
+          title={
+            urlModalMode === "link" ? "Lägg till länk" : "Infoga bild från URL"
+          }
+          placeholder={
+            urlModalMode === "link"
+              ? "https://..."
+              : "https://exempel.se/bild.png"
+          }
+          onConfirm={(url) => {
+            if (urlModalMode === "link") {
+              createLinkNode(url, menuState.x, menuState.y);
+            } else {
+              createImageNode(url, menuState.x, menuState.y);
+            }
+          }}
           onClose={() => setShowUrlModal(false)}
         />
       )}

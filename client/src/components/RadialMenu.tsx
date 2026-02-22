@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Type,
   Image as ImageIcon,
@@ -6,7 +6,6 @@ import {
   Mic,
   Timer,
   X,
-  Sparkles,
 } from "lucide-react";
 
 interface RadialMenuProps {
@@ -47,7 +46,7 @@ export default function RadialMenu({
       color: "#10b981",
     },
     {
-      id: "image-url",
+      id: "link", // 🔥 Ändrat ID för att matcha ny logik
       Icon: LinkIcon,
       label: "Länk",
       color: "#3b82f6",
@@ -101,10 +100,13 @@ export default function RadialMenu({
           position: "absolute",
           left: x,
           top: y,
-          transform: `translate(-50%, -50%) scale(${isOpen ? 1 : 0.8})`,
+          width: 0, // 🔥 FIX: 0 storlek så den inte blockerar något
+          height: 0,
+          overflow: "visible", // 🔥 FIX: Låt knappar sticka ut
+          transform: `scale(${isOpen ? 1 : 0.8})`, // Ingen translate behövs när w/h är 0
           opacity: isOpen ? 1 : 0,
           transition: "all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275)",
-          pointerEvents: "none", // Knappar har pointer-events: auto
+          zIndex: 10000, // 🔥 FIX: Se till att den ligger överst
         }}
       >
         {/* Stäng-knapp i mitten */}
@@ -121,7 +123,7 @@ export default function RadialMenu({
             alignItems: "center",
             justifyContent: "center",
             cursor: "pointer",
-            pointerEvents: "auto",
+            pointerEvents: "auto", // 🔥 FIX: Säkerställ klickbarhet
             position: "absolute",
             top: "50%",
             left: "50%",
@@ -136,6 +138,7 @@ export default function RadialMenu({
         {/* Cirkulära knappar */}
         {options.map((opt, index) => {
           const angle = (startAngle + index * angleStep) * (Math.PI / 180);
+          // Beräkna position för knappen
           const btnX = Math.cos(angle) * radius;
           const btnY = Math.sin(angle) * radius;
 
@@ -149,7 +152,7 @@ export default function RadialMenu({
                 top: "50%",
                 left: "50%",
                 transform: `translate(calc(-50% + ${btnX}px), calc(-50% + ${btnY}px))`,
-                pointerEvents: "auto",
+                pointerEvents: "auto", // 🔥 FIX: Säkerställ klickbarhet
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
@@ -157,7 +160,13 @@ export default function RadialMenu({
               }}
             >
               <button
-                onClick={() => onSelect(opt.id)}
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault(); // 🔥 FIX: Förhindra default-beteende
+                  e.stopPropagation(); // 🔥 FIX: Förhindra att klicket bubblar och stänger saker
+                  console.log("RadialMenu: Valde", opt.id);
+                  onSelect(opt.id);
+                }}
                 style={{
                   width: 52,
                   height: 52,

@@ -293,12 +293,14 @@ const ImageNodeView = ({
                 top: -40,
                 left: "50%",
                 transform: "translateX(-50%)",
-                background: "#222",
-                padding: "4px",
-                borderRadius: "6px",
+                background: "rgba(30, 30, 35, 0.9)",
+                backdropFilter: "blur(8px)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                padding: "6px",
+                borderRadius: "8px",
                 display: "flex",
-                gap: "4px",
-                boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+                gap: "6px",
+                boxShadow: "0 10px 20px -5px rgba(0,0,0,0.5)",
                 zIndex: 10,
               }}
             >
@@ -349,21 +351,20 @@ const ImageNodeView = ({
               onMouseDown={(e) => e.preventDefault()}
               style={{
                 position: "absolute",
-                top: -8,
-                right: -8,
+                top: -10,
+                right: -10,
                 background: "#ef4444",
                 color: "white",
-                border: "2px solid white",
-                borderRadius: "50%",
-                width: "20px",
-                height: "20px",
+                border: "2px solid #1e1e24",
+                borderRadius: "8px",
+                width: "24px",
+                height: "24px",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 cursor: "pointer",
                 zIndex: 20,
-                boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
-                padding: 0,
+                boxShadow: "0 4px 10px rgba(0,0,0,0.3)",
               }}
               title="Ta bort bild"
             >
@@ -375,15 +376,17 @@ const ImageNodeView = ({
               onMouseDown={handleMouseDown}
               style={{
                 position: "absolute",
-                right: -6,
+                right: -8,
                 bottom: "50%",
-                width: "12px",
-                height: "24px",
+                transform: "translateY(50%)",
+                width: "8px",
+                height: "32px",
                 background: "#6366f1",
                 borderRadius: "4px",
                 cursor: "ew-resize",
                 zIndex: 10,
-                border: "1px solid white",
+                border: "1px solid rgba(255,255,255,0.5)",
+                boxShadow: "0 0 10px rgba(99, 102, 241, 0.5)",
               }}
             />
           </>
@@ -551,6 +554,7 @@ export default function RichTextEditor({
         height: "auto",
         minHeight: "auto", // 🔥 FIX: Låt innehållet styra, tvinga inte 100%
         flexShrink: 0,
+        boxSizing: "border-box",
       }}
     >
       {isEditing && (
@@ -570,8 +574,10 @@ export default function RichTextEditor({
           width: "100%",
           cursor: isEditing ? "text" : "default",
           // Enkel styling för HTML-innehållet
-          fontSize: "14px",
-          lineHeight: "1.5",
+          fontSize: "16px",
+          lineHeight: "1.6",
+          overflowWrap: "break-word", // 🔥 FIX: Bryt långa ord
+          wordBreak: "break-word",
         }}
         className="tiptap-container"
       />
