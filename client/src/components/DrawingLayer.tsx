@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import { useRef, Fragment } from "react";
 import { useViewport } from "@xyflow/react";
 import type { Drawing, Point } from "../types/drawing";
 
@@ -91,7 +91,7 @@ export default function DrawingLayer({
             const lastPoint = drawing.points[drawing.points.length - 1];
 
             return (
-              <React.Fragment key={drawing.id}>
+              <Fragment key={drawing.id}>
                 {/* 1. Osynlig "Hit Area" för enklare klick på mobil */}
                 <path
                   d={getSvgPathFromPoints(drawing.points)}
@@ -168,7 +168,7 @@ export default function DrawingLayer({
                     </text>
                   </g>
                 )}
-              </React.Fragment>
+              </Fragment>
             );
           })}
 

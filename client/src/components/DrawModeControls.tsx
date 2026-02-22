@@ -1,5 +1,3 @@
-import React from "react";
-
 type DrawModeControlsProps = {
   onExit: () => void;
   style?: React.CSSProperties;

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { X, Sparkles, Palette } from "lucide-react";
 import { StitchFlower } from "../pomodoro/plantSystem/StitchPlant";

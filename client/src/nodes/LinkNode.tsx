@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Handle,
   Position,
@@ -7,7 +7,7 @@ import {
   useUpdateNodeInternals,
   useNodeConnections,
 } from "@xyflow/react";
-import { Link as LinkIcon, ExternalLink, Edit2, X } from "lucide-react";
+import { Link as LinkIcon, ExternalLink, X } from "lucide-react";
 
 export type LinkNodeData = {
   url: string;
@@ -83,7 +83,7 @@ export default function LinkNode({
     }
   };
 
-  const handleClick = (e: React.MouseEvent) => {
+  const handleClick = () => {
     // Öppna länk om vi inte redigerar
     if (!isEditing) {
       window.open(data.url, "_blank", "noopener,noreferrer");

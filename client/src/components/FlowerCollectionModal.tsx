@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { X, Loader2, Sprout, Lock, HelpCircle, Palette } from "lucide-react";
 import { supabase } from "../lib/supabase";
