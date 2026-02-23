@@ -160,4 +160,12 @@ export const spotifyApi = {
     // Volume är 0-100
     return apiCall(`/me/player/volume?volume_percent=${volume}`, "PUT");
   },
+
+  getUserPlaylists: async () => {
+    return apiCall("/me/playlists?limit=20");
+  },
+
+  playPlaylist: async (contextUri: string) => {
+    return apiCall("/me/player/play", "PUT", { context_uri: contextUri });
+  },
 };

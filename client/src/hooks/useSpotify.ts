@@ -8,8 +8,16 @@ export type SpotifyTrack = {
   uri: string;
 };
 
+export type SpotifyPlaylist = {
+  id: string;
+  name: string;
+  uri: string;
+  images: { url: string }[];
+};
+
 export function useSpotify() {
   const [track, setTrack] = useState<SpotifyTrack | null>(null);
+  const [playlists, setPlaylists] = useState<SpotifyPlaylist[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -54,6 +62,12 @@ export function useSpotify() {
   useEffect(() => {
     if (isAuthenticated) {
       fetchState(); // Hämta direkt
+
+      // Hämta spellistor en gång
+      spotifyApi.getUserPlaylists().then((data) => {
+        if (data && data.items) setPlaylists(data.items);
+      });
+
       const interval = setInterval(fetchState, 5000); // Polla var 5:e sek
       return () => clearInterval(interval);
     }
@@ -80,8 +94,14 @@ export function useSpotify() {
     await spotifyApi.setVolume(volume);
   };
 
+  const playPlaylist = async (uri: string) => {
+    await spotifyApi.playPlaylist(uri);
+    setTimeout(fetchState, 1000); // Vänta lite extra innan vi uppdaterar UI
+  };
+
   return {
     track,
+    playlists,
     isPlaying,
     isAuthenticated,
     isLoading,
@@ -95,6 +115,7 @@ export function useSpotify() {
     next,
     previous,
     setVolume,
+    playPlaylist,
     refreshState: fetchState,
   };
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useSpotify } from "../hooks/useSpotify";
 import {
   Play,
@@ -9,11 +9,13 @@ import {
   LogOut,
   Volume2,
   ChevronDown,
+  ListMusic,
 } from "lucide-react";
 
 export default function SpotifyPlayer() {
   const {
     track,
+    playlists,
     isPlaying,
     isAuthenticated,
     isLoading,
@@ -23,10 +25,49 @@ export default function SpotifyPlayer() {
     next,
     previous,
     setVolume,
+    playPlaylist,
   } = useSpotify();
 
   const [isMinimized, setIsMinimized] = useState(false);
   const [showVolume, setShowVolume] = useState(false);
+  const [showPlaylists, setShowPlaylists] = useState(false);
+
+  // 🔥 State för position (Drag & Drop)
+  const [position, setPosition] = useState({ x: 20, y: 100 });
+  const isDragging = useRef(false);
+  const dragOffset = useRef({ x: 0, y: 0 });
+
+  // 🔥 Hantera globala mus-event för att dra fönstret smidigt
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDragging.current) return;
+      setPosition({
+        x: e.clientX - dragOffset.current.x,
+        y: e.clientY - dragOffset.current.y,
+      });
+    };
+
+    const handleMouseUp = () => {
+      isDragging.current = false;
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, []);
+
+  const startDrag = (e: React.MouseEvent) => {
+    // Starta dragning
+    isDragging.current = true;
+    dragOffset.current = {
+      x: e.clientX - position.x,
+      y: e.clientY - position.y,
+    };
+  };
 
   if (isLoading) return null;
 
@@ -37,8 +78,8 @@ export default function SpotifyPlayer() {
         className="nodrag"
         style={{
           position: "absolute",
-          bottom: 20,
-          left: 20,
+          top: 12, // 🔥 Flyttad till toppen
+          right: 260, // 🔥 Flyttad till höger (bredvid Share-knappen)
           zIndex: 50,
         }}
       >
@@ -64,7 +105,11 @@ export default function SpotifyPlayer() {
           }
           onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
         >
-          <Music size={18} />
+          <img
+            src="/SpotifyLogo.png"
+            alt="Spotify"
+            style={{ width: 20, height: 20, objectFit: "contain" }}
+          />
           Connect Spotify
         </button>
       </div>
@@ -78,8 +123,8 @@ export default function SpotifyPlayer() {
         className="nodrag"
         style={{
           position: "absolute",
-          bottom: 20,
-          left: 20,
+          left: position.x, // 🔥 Använd dynamisk position
+          top: position.y,
           zIndex: 50,
           background: "rgba(30, 30, 35, 0.6)",
           backdropFilter: "blur(12px)",
@@ -90,14 +135,19 @@ export default function SpotifyPlayer() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          cursor: "pointer",
+          cursor: "grab", // 🔥 Visa att den går att dra
           boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
           transition: "all 0.2s",
         }}
+        onMouseDown={startDrag} // 🔥 Starta dragning vid klick
         onClick={() => setIsMinimized(false)}
         title="Visa Spotify"
       >
-        <Music size={24} color="#1DB954" />
+        <img
+          src="/SpotifyLogo.png"
+          alt="Spotify"
+          style={{ width: 28, height: 28, objectFit: "contain" }}
+        />
         {isPlaying && (
           <div
             style={{
@@ -122,8 +172,8 @@ export default function SpotifyPlayer() {
       className="nodrag"
       style={{
         position: "absolute",
-        bottom: 20,
-        left: 20,
+        left: position.x, // 🔥 Använd dynamisk position
+        top: position.y,
         zIndex: 50,
         width: 300,
         background: "rgba(30, 30, 35, 0.85)",
@@ -139,13 +189,74 @@ export default function SpotifyPlayer() {
         transition: "all 0.3s ease",
       }}
     >
+      {/* Playlist Popup */}
+      {showPlaylists && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: "100%",
+            left: 0,
+            width: "100%",
+            maxHeight: "300px",
+            overflowY: "auto",
+            background: "rgba(30, 30, 35, 0.95)",
+            backdropFilter: "blur(16px)",
+            borderRadius: "12px",
+            marginBottom: "8px",
+            border: "1px solid rgba(255,255,255,0.1)",
+            padding: "8px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "4px",
+            boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
+          }}
+        >
+          <div style={{ fontSize: 12, color: "#888", padding: "4px 8px" }}>
+            DINA SPELLISTOR
+          </div>
+          {playlists.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => {
+                playPlaylist(p.uri);
+                setShowPlaylists(false);
+              }}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "white",
+                textAlign: "left",
+                padding: "8px",
+                borderRadius: "6px",
+                cursor: "pointer",
+                fontSize: "13px",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                transition: "background 0.2s",
+              }}
+              onMouseEnter={(e) =>
+                (e.currentTarget.style.background = "rgba(255,255,255,0.1)")
+              }
+              onMouseLeave={(e) =>
+                (e.currentTarget.style.background = "transparent")
+              }
+            >
+              {p.name}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Header */}
       <div
         style={{
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
+          cursor: "grab", // 🔥 Header är "handtaget"
         }}
+        onMouseDown={startDrag} // 🔥 Starta dragning när man drar i headern
       >
         <div
           style={{
@@ -158,7 +269,12 @@ export default function SpotifyPlayer() {
             letterSpacing: "0.05em",
           }}
         >
-          <Music size={12} /> SPOTIFY
+          <img
+            src="/SpotifyLogo.png"
+            alt="Spotify"
+            style={{ width: 14, height: 14, objectFit: "contain" }}
+          />{" "}
+          SPOTIFY
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button
@@ -252,6 +368,21 @@ export default function SpotifyPlayer() {
           marginTop: "4px",
         }}
       >
+        {/* Playlist Toggle */}
+        <button
+          onClick={() => setShowPlaylists(!showPlaylists)}
+          style={{
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            color: showPlaylists ? "#1DB954" : "#888",
+            padding: 4,
+          }}
+          title="Spellistor"
+        >
+          <ListMusic size={18} />
+        </button>
+
         {/* Volym Toggle */}
         <div style={{ position: "relative" }}>
           <button
@@ -356,9 +487,6 @@ export default function SpotifyPlayer() {
             <SkipForward size={20} fill="currentColor" />
           </button>
         </div>
-
-        {/* Spacer för balans */}
-        <div style={{ width: 24 }} />
       </div>
     </div>
   );
