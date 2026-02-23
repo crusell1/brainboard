@@ -183,7 +183,7 @@ export default function SpotifyPlayer() {
                 top: "100%", // 🔥 Öppna listan NEDÅT istället för uppåt
                 left: 0,
                 width: "100%",
-                maxHeight: "250px", // 🔥 Lite mindre maxhöjd för att inte ta över skärmen
+                maxHeight: "180px", // 🔥 Ännu kortare lista enligt önskemål
                 overflowY: "auto",
                 background: "rgba(30, 30, 35, 0.95)",
                 backdropFilter: "blur(16px)",
@@ -209,17 +209,19 @@ export default function SpotifyPlayer() {
                       setShowPlaylists(false);
                     }}
                     style={{
+                      display: "flex", // 🔥 Flex för att visa bild + text
+                      alignItems: "center",
+                      gap: "10px",
                       background: "transparent",
                       border: "none",
                       color: "white",
                       textAlign: "left",
-                      padding: "8px",
+                      padding: "6px",
                       borderRadius: "6px",
                       cursor: "pointer",
                       fontSize: "13px",
                       whiteSpace: "normal", // 🔥 Tillåt radbrytning
                       lineHeight: "1.4",
-                      display: "block",
                       transition: "background 0.2s",
                     }}
                     onMouseEnter={(e) =>
@@ -230,6 +232,33 @@ export default function SpotifyPlayer() {
                       (e.currentTarget.style.background = "transparent")
                     }
                   >
+                    {/* 🔥 Visa bild om den finns */}
+                    {p.images && p.images.length > 0 ? (
+                      <img
+                        src={p.images[0].url}
+                        alt=""
+                        style={{
+                          width: 32,
+                          height: 32,
+                          borderRadius: 4,
+                          objectFit: "cover",
+                        }}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          width: 32,
+                          height: 32,
+                          borderRadius: 4,
+                          background: "#333",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <Music size={16} color="#666" />
+                      </div>
+                    )}
                     {p.name}
                   </button>
                 ))
@@ -349,22 +378,7 @@ export default function SpotifyPlayer() {
               marginTop: "4px",
             }}
           >
-            {/* Shuffle Toggle */}
-            <button
-              onClick={toggleShuffle}
-              style={{
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-                color: isShuffling ? "#1DB954" : "#888",
-                padding: 4,
-              }}
-              title="Blanda"
-            >
-              <Shuffle size={18} />
-            </button>
-
-            {/* Playlist Toggle */}
+            {/* 1. Playlist Toggle */}
             <button
               onClick={() => setShowPlaylists(!showPlaylists)}
               style={{
@@ -376,10 +390,10 @@ export default function SpotifyPlayer() {
               }}
               title="Spellistor"
             >
-              <ListMusic size={18} />
+              <ListMusic size={20} />
             </button>
 
-            {/* Volym Toggle */}
+            {/* 2. Volym Toggle */}
             <div style={{ position: "relative" }}>
               <button
                 onClick={() => setShowVolume(!showVolume)}
@@ -391,7 +405,7 @@ export default function SpotifyPlayer() {
                   padding: 4,
                 }}
               >
-                <Volume2 size={18} />
+                <Volume2 size={20} />
               </button>
               {showVolume && (
                 <div
@@ -423,6 +437,21 @@ export default function SpotifyPlayer() {
               )}
             </div>
 
+            {/* 3. Shuffle Toggle (Flyttad hit) */}
+            <button
+              onClick={toggleShuffle}
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                color: isShuffling ? "#1DB954" : "#888",
+                padding: 4,
+              }}
+              title="Blanda"
+            >
+              <Shuffle size={20} />
+            </button>
+
             {/* Playback Controls */}
             <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
               <button
@@ -443,8 +472,9 @@ export default function SpotifyPlayer() {
               <button
                 onClick={togglePlay}
                 style={{
-                  width: 40,
-                  height: 40,
+                  width: 48, // 🔥 Större knapp
+                  height: 48,
+                  flexShrink: 0, // 🔥 Förhindra att den trycks ihop
                   borderRadius: "50%",
                   background: "white",
                   border: "none",
@@ -464,10 +494,10 @@ export default function SpotifyPlayer() {
                 }
               >
                 {isPlaying ? (
-                  <Pause size={20} fill="currentColor" />
+                  <Pause size={24} fill="currentColor" /> // 🔥 Större ikon
                 ) : (
                   <Play
-                    size={20}
+                    size={24} // 🔥 Större ikon
                     fill="currentColor"
                     style={{ marginLeft: 2 }}
                   />
