@@ -38,11 +38,44 @@ const base64encode = (input: ArrayBuffer) => {
 
 const getAccessToken = () => localStorage.getItem("spotify_access_token");
 
+const refreshAccessToken = async () => {
+  const refreshToken = localStorage.getItem("spotify_refresh_token");
+  if (!refreshToken) return false;
+
+  const payload = {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      client_id: CLIENT_ID,
+    }),
+  };
+
+  try {
+    const body = await fetch("https://accounts.spotify.com/api/token", payload);
+    const response = await body.json();
+
+    if (response.access_token) {
+      localStorage.setItem("spotify_access_token", response.access_token);
+      if (response.refresh_token) {
+        localStorage.setItem("spotify_refresh_token", response.refresh_token);
+      }
+      return true;
+    }
+  } catch (e) {
+    console.error("Kunde inte uppdatera token:", e);
+  }
+  return false;
+};
+
 const apiCall = async (endpoint: string, method = "GET", body?: any) => {
-  const token = getAccessToken();
+  let token = getAccessToken();
   if (!token) return null;
 
-  const res = await fetch(`https://api.spotify.com/v1${endpoint}`, {
+  let res = await fetch(`https://api.spotify.com/v1${endpoint}`, {
     method,
     headers: {
       Authorization: `Bearer ${token}`,
@@ -52,10 +85,26 @@ const apiCall = async (endpoint: string, method = "GET", body?: any) => {
   });
 
   if (res.status === 401) {
-    // Token expired - här skulle vi kunna köra refresh logic automatiskt
-    // För nu: logga ut eller låt UI hantera det
-    console.warn("Spotify token expired");
-    return null;
+    console.log("🔄 Spotify-token utgick, försöker uppdatera...");
+    const success = await refreshAccessToken();
+
+    if (success) {
+      token = getAccessToken(); // Hämta den nya token
+      // Försök igen med nya token
+      res = await fetch(`https://api.spotify.com/v1${endpoint}`, {
+        method,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    } else {
+      console.warn("Kunde inte uppdatera token. Loggar ut.");
+      localStorage.removeItem("spotify_access_token");
+      localStorage.removeItem("spotify_refresh_token");
+      return null;
+    }
   }
 
   if (res.status === 204) return true; // Success, no content
@@ -86,6 +135,7 @@ export const spotifyApi = {
       code_challenge_method: "S256",
       code_challenge: codeChallenge,
       redirect_uri: REDIRECT_URI,
+      show_dialog: "true", // 🔥 Tvinga fram inloggningsrutan så man kan byta konto
     });
 
     window.location.href = `https://accounts.spotify.com/authorize?${params.toString()}`;

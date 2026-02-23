@@ -17,6 +17,8 @@ export default function SpotifyPlayer() {
     track,
     playlists,
     isPlaying,
+    progress,
+    duration,
     isAuthenticated,
     isLoading,
     login,
@@ -37,6 +39,29 @@ export default function SpotifyPlayer() {
   // 🔥 Refs för att hantera klick utanför
   const playerRef = useRef<HTMLDivElement>(null);
   const toggleRef = useRef<HTMLDivElement>(null);
+
+  // 🔥 Progress bar logic
+  const [localProgress, setLocalProgress] = useState(0);
+
+  useEffect(() => {
+    setLocalProgress(progress);
+  }, [progress]);
+
+  useEffect(() => {
+    if (isPlaying) {
+      const interval = setInterval(() => {
+        setLocalProgress((p) => Math.min(p + 1000, duration));
+      }, 1000);
+      return () => clearInterval(interval);
+    }
+  }, [isPlaying, duration]);
+
+  const formatTime = (ms: number) => {
+    const totalSeconds = Math.floor(ms / 1000);
+    const m = Math.floor(totalSeconds / 60);
+    const s = totalSeconds % 60;
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  };
 
   // 🔥 Dölj på mobil
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
@@ -127,8 +152,8 @@ export default function SpotifyPlayer() {
           backdropFilter: "blur(12px)",
           border: "1px solid rgba(255,255,255,0.1)",
           borderRadius: "50%",
-          width: 40, // 🔥 Mindre storlek (var 48)
-          height: 40,
+          width: 32, // 🔥 Mindre storlek (var 40)
+          height: 32,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -142,7 +167,7 @@ export default function SpotifyPlayer() {
         <img
           src="/SpotifyLogo.png"
           alt="Spotify"
-          style={{ width: 28, height: 28, objectFit: "contain" }}
+          style={{ width: 20, height: 20, objectFit: "contain" }}
         />
         {isPlaying && (
           <div
@@ -375,6 +400,41 @@ export default function SpotifyPlayer() {
               >
                 {track?.artist || "Välj musik i Spotify"}
               </div>
+            </div>
+          </div>
+
+          {/* Progress Bar */}
+          <div style={{ width: "100%", marginTop: "4px" }}>
+            <div
+              style={{
+                width: "100%",
+                height: "4px",
+                background: "rgba(255,255,255,0.1)",
+                borderRadius: "2px",
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  width: `${duration > 0 ? (localProgress / duration) * 100 : 0}%`,
+                  height: "100%",
+                  background: "#1DB954",
+                  borderRadius: "2px",
+                  transition: "width 1s linear",
+                }}
+              />
+            </div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                fontSize: "10px",
+                color: "#888",
+                marginTop: "4px",
+              }}
+            >
+              <span>{formatTime(localProgress)}</span>
+              <span>{formatTime(duration)}</span>
             </div>
           </div>
 

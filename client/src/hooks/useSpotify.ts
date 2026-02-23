@@ -20,6 +20,8 @@ export function useSpotify() {
   const [playlists, setPlaylists] = useState<SpotifyPlaylist[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isShuffling, setIsShuffling] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [duration, setDuration] = useState(0);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -55,6 +57,8 @@ export function useSpotify() {
       });
       setIsPlaying(state.is_playing);
       setIsShuffling(state.shuffle_state); // 🔥 Hämta shuffle-status
+      setProgress(state.progress_ms || 0);
+      setDuration(state.item.duration_ms || 0);
     } else {
       // Inget spelas eller Spotify är inte aktivt
       setIsPlaying(false);
@@ -110,6 +114,8 @@ export function useSpotify() {
     track,
     playlists,
     isPlaying,
+    progress,
+    duration,
     isAuthenticated,
     isLoading,
     login: spotifyApi.login,

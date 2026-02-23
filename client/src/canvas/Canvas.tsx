@@ -29,6 +29,7 @@ import ImageUrlModal from "../components/ImageUrlModal"; // 🔥 Importera Image
 import ShareModal from "../components/ShareModal"; // 🔥 Importera ShareModal
 import ConfirmModal from "../components/ConfirmModal"; // 🔥 Importera ConfirmModal
 import SpotifyPlayer from "../components/SpotifyPlayer"; // 🔥 Importera SpotifyPlayer
+import { spotifyApi } from "../lib/spotify"; // 🔥 Importera spotifyApi
 import {
   Share2,
   Pencil,
@@ -1168,6 +1169,7 @@ export default function Canvas() {
   };
 
   const handleLogout = async () => {
+    spotifyApi.logout(); // 🔥 Rensa Spotify-tokens vid utloggning
     await supabase.auth.signOut();
     window.location.reload();
   };
