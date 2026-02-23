@@ -1,0 +1,15 @@
+{
+  "short_name": "BrainBoard",
+  "name": "BrainBoard AI",
+  "icons": [
+    {
+      "src": "logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#1e1e24",
+  "background_color": "#1e1e24"
+}

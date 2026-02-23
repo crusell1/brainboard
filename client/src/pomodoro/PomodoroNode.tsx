@@ -465,7 +465,9 @@ export default function PomodoroNode({
           height: "100%",
           background: backgroundStyle, // 🔥 Dynamisk bakgrund
           borderRadius: 24,
-          border: `1px solid ${status === "idle" ? "#333" : accentColor}`,
+          border: `${status === "idle" ? "4px" : "8px"} solid ${
+            status === "idle" ? "#666" : accentColor
+          }`,
           boxShadow: selected
             ? `0 0 0 2px ${accentColor}, 0 10px 40px -10px ${glowColor}`
             : `0 10px 30px -10px ${status === "idle" ? "rgba(0,0,0,0.5)" : glowColor}`,
