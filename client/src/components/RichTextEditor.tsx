@@ -4,6 +4,7 @@ import {
   NodeViewWrapper,
   ReactNodeViewRenderer,
 } from "@tiptap/react";
+import { Mark, mergeAttributes } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import LinkExtension from "@tiptap/extension-link";
@@ -15,6 +16,7 @@ import {
   ListOrdered,
   Heading1,
   Heading2,
+  Heading3,
   Mic,
   MicOff,
   Link as LinkIcon,
@@ -29,6 +31,59 @@ import {
 import { useEffect, useRef, useMemo, useState } from "react";
 import useSpeechRecognition from "../hooks/useSpeechRecognition";
 import ImageUrlModal from "./ImageUrlModal";
+
+// 🔥 Custom Font Size Extension
+const FontSize = Mark.create({
+  name: "fontSize",
+
+  addAttributes() {
+    return {
+      size: {
+        default: null,
+        parseHTML: (element) => element.style.fontSize.replace("px", ""),
+        renderHTML: (attributes) => {
+          if (!attributes.size) {
+            return {};
+          }
+          return {
+            style: `font-size: ${attributes.size}px`,
+          };
+        },
+      },
+    };
+  },
+
+  parseHTML() {
+    return [
+      {
+        style: "font-size",
+      },
+    ];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return [
+      "span",
+      mergeAttributes(this.options.HTMLAttributes, HTMLAttributes),
+      0,
+    ];
+  },
+
+  addCommands() {
+    return {
+      setFontSize:
+        (size: string) =>
+        ({ commands }: any) => {
+          return commands.setMark(this.name, { size });
+        },
+      unsetFontSize:
+        () =>
+        ({ commands }: any) => {
+          return commands.unsetMark(this.name);
+        },
+    } as any;
+  },
+});
 
 type RichTextEditorProps = {
   content: string;
@@ -100,6 +155,46 @@ const MenuBar = ({
         flexWrap: "wrap",
       }}
     >
+      {/* Font Size Dropdown */}
+      <select
+        className="nodrag"
+        onMouseDown={(e) => e.stopPropagation()} // 🔥 VIKTIGT: Låt select ta fokus så den kan öppnas
+        onChange={(e) => {
+          const size = e.target.value;
+          if (size) {
+            editor.chain().focus().setFontSize(size).run();
+          } else {
+            editor.chain().focus().unsetFontSize().run();
+          }
+        }}
+        value={editor.getAttributes("fontSize").size || ""}
+        style={{
+          background: "transparent",
+          color: "#ccc",
+          border: "1px solid #444",
+          borderRadius: "4px",
+          padding: "0 4px",
+          fontSize: "12px",
+          height: "24px",
+          cursor: "pointer",
+          outline: "none",
+          marginRight: "4px",
+        }}
+      >
+        <option value="" style={{ color: "black" }}>
+          Auto
+        </option>
+        {[8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 30, 36, 48, 60, 72, 96].map(
+          (size) => (
+            <option key={size} value={size} style={{ color: "black" }}>
+              {size}
+            </option>
+          ),
+        )}
+      </select>
+
+      <div style={{ width: 1, background: "#444", margin: "0 4px" }} />
+
       <button
         onClick={() => editor.chain().focus().toggleBold().run()}
         style={buttonStyle(editor.isActive("bold"))}
@@ -128,6 +223,13 @@ const MenuBar = ({
         title="Rubrik 2"
       >
         <Heading2 size={14} />
+      </button>
+      <button
+        onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
+        style={buttonStyle(editor.isActive("heading", { level: 3 }))}
+        title="Rubrik 3"
+      >
+        <Heading3 size={14} />
       </button>
       <div style={{ width: 1, background: "#444", margin: "0 4px" }} />
       <button
@@ -449,6 +551,7 @@ export default function RichTextEditor({
       CustomImage.configure({
         inline: false, // Tvinga block-nivå för att alignment ska funka bra
       }),
+      FontSize, // 🔥 Lägg till FontSize
     ],
     [],
   );
@@ -461,13 +564,22 @@ export default function RichTextEditor({
     onUpdate: ({ editor }) => {
       onChange(editor.getHTML());
     },
-    onBlur: () => {
-      onBlur();
+    onBlur: ({ event }) => {
+      // 🔥 FIX: Stäng inte editorn om vi klickar inuti menyn (t.ex. dropdown)
+      if (
+        event.relatedTarget &&
+        (event.relatedTarget as HTMLElement).closest(
+          ".rich-text-editor-wrapper",
+        )
+      ) {
+        return;
+      }
+      onBlur(); // Annars, stäng editorn
     },
     editorProps: {
       attributes: {
         // VIKTIGT: 'nodrag' läggs till villkorligt. Utan den kan vi dra noden via texten.
-        class: `prose prose-sm sm:prose lg:prose-lg xl:prose-xl focus:outline-none text-white ${
+        class: `prose prose-xl focus:outline-none text-white ${
           isEditing ? "nodrag" : ""
         } tiptap`, // 🔥 FIX: Lägg till 'tiptap' klassen så NoteNode kan hitta och mäta den
         style: "min-height: 60px; outline: none;",
@@ -530,7 +642,7 @@ export default function RichTextEditor({
       editor.setOptions({
         editorProps: {
           attributes: {
-            class: `prose prose-sm sm:prose lg:prose-lg xl:prose-xl focus:outline-none text-white ${
+            class: `prose prose-xl focus:outline-none text-white ${
               isEditing ? "nodrag" : ""
             } tiptap`, // 🔥 FIX: Lägg till 'tiptap' här också
             style: "min-height: 60px; outline: none;",
@@ -574,7 +686,7 @@ export default function RichTextEditor({
           width: "100%",
           cursor: isEditing ? "text" : "default",
           // Enkel styling för HTML-innehållet
-          fontSize: "16px",
+          fontSize: "20px",
           lineHeight: "1.6",
           overflowWrap: "break-word", // 🔥 FIX: Bryt långa ord
           wordBreak: "break-word",
@@ -625,6 +737,9 @@ export default function RichTextEditor({
         .tiptap ol { list-style-type: decimal; }
         .tiptap h1 { font-size: 1.4em; font-weight: bold; margin-bottom: 8px; }
         .tiptap h2 { font-size: 1.2em; font-weight: bold; margin-bottom: 6px; }
+        .tiptap h1 { font-size: 1.6em; font-weight: bold; margin-bottom: 8px; }
+        .tiptap h2 { font-size: 1.4em; font-weight: bold; margin-bottom: 6px; }
+        .tiptap h3 { font-size: 1.2em; font-weight: bold; margin-bottom: 4px; }
         .tiptap a { color: #6366f1; text-decoration: underline; cursor: pointer; }
         .tiptap-container .is-editor-empty:first-child::before {
           color: #ccc;

@@ -1,6 +1,13 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
-import { Loader2 } from "lucide-react";
+import {
+  Loader2,
+  X,
+  Link as LinkIcon,
+  Copy,
+  Check,
+  Trash2,
+} from "lucide-react";
 
 type ShareModalProps = {
   boardId: string;
@@ -163,21 +170,7 @@ export default function ShareModal({ boardId, onClose }: ShareModalProps) {
               WebkitTextFillColor: "transparent",
             }}
           >
-            <svg
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="#6366f1"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-              <circle cx="9" cy="7" r="4"></circle>
-              <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
-              <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
-            </svg>
+            <LinkIcon size={24} color="#6366f1" />
             Dela Board
           </h2>
           <button
@@ -202,19 +195,7 @@ export default function ShareModal({ boardId, onClose }: ShareModalProps) {
               (e.currentTarget.style.background = "rgba(255,255,255,0.05)")
             }
           >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="#cccccc"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <line x1="18" y1="6" x2="6" y2="18"></line>
-              <line x1="6" y1="6" x2="18" y2="18"></line>
-            </svg>
+            <X size={20} color="#ccc" />
           </button>
         </div>
 
@@ -295,20 +276,7 @@ export default function ShareModal({ boardId, onClose }: ShareModalProps) {
               <Loader2 className="animate-spin" size={16} color="white" />
             ) : (
               <>
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="white"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
-                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
-                </svg>{" "}
-                Skapa inbjudningslänk
+                <LinkIcon size={16} color="white" /> Skapa inbjudningslänk
               </>
             )}
           </button>
@@ -356,6 +324,7 @@ export default function ShareModal({ boardId, onClose }: ShareModalProps) {
                   }}
                 >
                   <div
+                    onClick={(e) => e.stopPropagation()}
                     style={{
                       display: "flex",
                       flexDirection: "column",
@@ -372,6 +341,7 @@ export default function ShareModal({ boardId, onClose }: ShareModalProps) {
                       }}
                     >
                       <svg
+                        xmlns="http://www.w3.org/2000/svg"
                         width="12"
                         height="12"
                         viewBox="0 0 24 24"
@@ -381,15 +351,17 @@ export default function ShareModal({ boardId, onClose }: ShareModalProps) {
                         strokeLinecap="round"
                         strokeLinejoin="round"
                       >
-                        <circle cx="12" cy="12" r="10"></circle>
-                        <polyline points="12 6 12 12 16 14"></polyline>
+                        <circle cx="12" cy="12" r="10" />
+                        <polyline points="12 6 12 12 16 14" />
                       </svg>
                       {formatExpiry(invite.expires_at)}
                     </div>
-                    <span style={{ fontSize: "11px", color: "#666" }}>
-                      Behörighet:{" "}
-                      <span style={{ color: "#ccc" }}>{invite.role}</span>
-                    </span>
+                    <div style={{ fontSize: "12px", color: "#bbb" }}>
+                      <span>Behörighet:</span>
+                      <span style={{ color: "#fff", marginLeft: "4px" }}>
+                        {invite.role}
+                      </span>
+                    </div>
                   </div>
 
                   <div style={{ display: "flex", gap: "8px" }}>
@@ -414,43 +386,17 @@ export default function ShareModal({ boardId, onClose }: ShareModalProps) {
                       }}
                     >
                       {copiedId === invite.id ? (
-                        <svg
-                          width="18"
-                          height="18"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="white"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <polyline points="20 6 9 17 4 12"></polyline>
-                        </svg>
+                        <Check size={18} color="#10b981" />
                       ) : (
-                        <svg
-                          width="18"
-                          height="18"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="white"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <rect
-                            x="9"
-                            y="9"
-                            width="13"
-                            height="13"
-                            rx="2"
-                            ry="2"
-                          ></rect>
-                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                        </svg>
+                        <Copy size={18} color="white" />
                       )}
                     </button>
                     <button
-                      onClick={() => revokeInvite(invite.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        revokeInvite(invite.id);
+                      }}
+                      type="button"
                       title="Återkalla (ta bort)"
                       style={{
                         background: "rgba(239, 68, 68, 0.1)",
@@ -465,21 +411,7 @@ export default function ShareModal({ boardId, onClose }: ShareModalProps) {
                         color: "#ef4444",
                       }}
                     >
-                      <svg
-                        width="18"
-                        height="18"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="#ef4444"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <polyline points="3 6 5 6 21 6"></polyline>
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                        <line x1="10" y1="11" x2="10" y2="17"></line>
-                        <line x1="14" y1="11" x2="14" y2="17"></line>
-                      </svg>
+                      <Trash2 size={18} color="#ef4444" />
                     </button>
                   </div>
                 </div>
