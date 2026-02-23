@@ -38,6 +38,14 @@ export default function SpotifyPlayer() {
   const playerRef = useRef<HTMLDivElement>(null);
   const toggleRef = useRef<HTMLDivElement>(null);
 
+  // 🔥 Dölj på mobil
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (
@@ -56,6 +64,7 @@ export default function SpotifyPlayer() {
     };
   }, []);
 
+  if (isMobile) return null;
   if (isLoading) return null;
 
   // 1. Ej inloggad state - Visa "Connect"-knapp
@@ -77,7 +86,7 @@ export default function SpotifyPlayer() {
             color: "white",
             border: "none",
             borderRadius: "24px",
-            padding: "10px 20px",
+            padding: "8px 12px", // 🔥 Mindre padding för att matcha andra knappar
             display: "flex",
             alignItems: "center",
             gap: "8px",
@@ -118,8 +127,8 @@ export default function SpotifyPlayer() {
           backdropFilter: "blur(12px)",
           border: "1px solid rgba(255,255,255,0.1)",
           borderRadius: "50%",
-          width: 48,
-          height: 48,
+          width: 40, // 🔥 Mindre storlek (var 48)
+          height: 40,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -453,7 +462,9 @@ export default function SpotifyPlayer() {
             </button>
 
             {/* Playback Controls */}
-            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {" "}
+              {/* 🔥 Mindre gap (var 16) */}
               <button
                 onClick={previous}
                 style={{
@@ -468,7 +479,6 @@ export default function SpotifyPlayer() {
               >
                 <SkipBack size={20} fill="currentColor" />
               </button>
-
               <button
                 onClick={togglePlay}
                 style={{
@@ -494,16 +504,15 @@ export default function SpotifyPlayer() {
                 }
               >
                 {isPlaying ? (
-                  <Pause size={24} fill="currentColor" /> // 🔥 Större ikon
+                  <Pause size={28} fill="currentColor" /> // 🔥 Större ikon (var 24)
                 ) : (
                   <Play
-                    size={24} // 🔥 Större ikon
+                    size={28} // 🔥 Större ikon (var 24)
                     fill="currentColor"
                     style={{ marginLeft: 2 }}
                   />
                 )}
               </button>
-
               <button
                 onClick={next}
                 style={{
