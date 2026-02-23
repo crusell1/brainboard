@@ -19,6 +19,7 @@ export function useSpotify() {
   const [track, setTrack] = useState<SpotifyTrack | null>(null);
   const [playlists, setPlaylists] = useState<SpotifyPlaylist[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isShuffling, setIsShuffling] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -53,6 +54,7 @@ export function useSpotify() {
         uri: state.item.uri,
       });
       setIsPlaying(state.is_playing);
+      setIsShuffling(state.shuffle_state); // 🔥 Hämta shuffle-status
     } else {
       // Inget spelas eller Spotify är inte aktivt
       setIsPlaying(false);
@@ -99,6 +101,11 @@ export function useSpotify() {
     setTimeout(fetchState, 1000); // Vänta lite extra innan vi uppdaterar UI
   };
 
+  const toggleShuffle = async () => {
+    await spotifyApi.shuffle(!isShuffling);
+    setTimeout(fetchState, 500);
+  };
+
   return {
     track,
     playlists,
@@ -116,6 +123,8 @@ export function useSpotify() {
     previous,
     setVolume,
     playPlaylist,
+    isShuffling,
+    toggleShuffle,
     refreshState: fetchState,
   };
 }

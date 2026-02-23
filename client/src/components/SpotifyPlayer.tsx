@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useSpotify } from "../hooks/useSpotify";
 import {
   Play,
@@ -9,6 +9,7 @@ import {
   LogOut,
   Volume2,
   ListMusic,
+  Shuffle,
 } from "lucide-react";
 
 export default function SpotifyPlayer() {
@@ -25,11 +26,35 @@ export default function SpotifyPlayer() {
     previous,
     setVolume,
     playPlaylist,
+    isShuffling,
+    toggleShuffle,
   } = useSpotify();
 
   const [isMinimized, setIsMinimized] = useState(true); // Starta minimerad
   const [showVolume, setShowVolume] = useState(false);
   const [showPlaylists, setShowPlaylists] = useState(false);
+
+  // 🔥 Refs för att hantera klick utanför
+  const playerRef = useRef<HTMLDivElement>(null);
+  const toggleRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        playerRef.current &&
+        !playerRef.current.contains(event.target as Node) &&
+        toggleRef.current &&
+        !toggleRef.current.contains(event.target as Node)
+      ) {
+        setIsMinimized(true);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
 
   if (isLoading) return null;
 
@@ -41,7 +66,7 @@ export default function SpotifyPlayer() {
         style={{
           position: "absolute",
           top: 12, // 🔥 Flyttad till toppen
-          right: 260, // 🔥 Flyttad till höger (bredvid Share-knappen)
+          right: 220, // 🔥 Flyttad lite närmare de andra knapparna
           zIndex: 50,
         }}
       >
@@ -82,11 +107,12 @@ export default function SpotifyPlayer() {
     <>
       {/* 2. Toggle-knapp (Alltid synlig) */}
       <div
+        ref={toggleRef}
         className="nodrag"
         style={{
           position: "absolute",
           top: 12,
-          right: 260, // Fast position bredvid Dela-knappen
+          right: 220, // 🔥 Flyttad lite närmare de andra knapparna
           zIndex: 51, // Ligg över spelaren
           background: "rgba(30, 30, 35, 0.6)",
           backdropFilter: "blur(12px)",
@@ -128,11 +154,12 @@ export default function SpotifyPlayer() {
       {/* 3. Spelare (Dropdown) */}
       {!isMinimized && (
         <div
+          ref={playerRef}
           className="nodrag"
           style={{
             position: "absolute",
             top: 70, // Öppnas under knappen
-            right: 260, // Högerjusterad med knappen
+            right: 10, // 🔥 Ligger nu dikt an mot högerkanten (under de andra knapparna)
             zIndex: 50,
             width: 300,
             background: "rgba(30, 30, 35, 0.85)",
@@ -156,7 +183,7 @@ export default function SpotifyPlayer() {
                 top: "100%", // 🔥 Öppna listan NEDÅT istället för uppåt
                 left: 0,
                 width: "100%",
-                maxHeight: "300px",
+                maxHeight: "250px", // 🔥 Lite mindre maxhöjd för att inte ta över skärmen
                 overflowY: "auto",
                 background: "rgba(30, 30, 35, 0.95)",
                 backdropFilter: "blur(16px)",
@@ -190,9 +217,9 @@ export default function SpotifyPlayer() {
                       borderRadius: "6px",
                       cursor: "pointer",
                       fontSize: "13px",
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
+                      whiteSpace: "normal", // 🔥 Tillåt radbrytning
+                      lineHeight: "1.4",
+                      display: "block",
                       transition: "background 0.2s",
                     }}
                     onMouseEnter={(e) =>
@@ -322,6 +349,21 @@ export default function SpotifyPlayer() {
               marginTop: "4px",
             }}
           >
+            {/* Shuffle Toggle */}
+            <button
+              onClick={toggleShuffle}
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                color: isShuffling ? "#1DB954" : "#888",
+                padding: 4,
+              }}
+              title="Blanda"
+            >
+              <Shuffle size={18} />
+            </button>
+
             {/* Playlist Toggle */}
             <button
               onClick={() => setShowPlaylists(!showPlaylists)}

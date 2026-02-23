@@ -170,4 +170,8 @@ export const spotifyApi = {
   playPlaylist: async (contextUri: string) => {
     return apiCall("/me/player/play", "PUT", { context_uri: contextUri });
   },
+
+  shuffle: async (state: boolean) => {
+    return apiCall(`/me/player/shuffle?state=${state}`, "PUT");
+  },
 };
