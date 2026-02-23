@@ -8,6 +8,8 @@ const SCOPES = [
   "user-read-currently-playing",
   "user-read-private",
   "user-read-email",
+  "playlist-read-private", // 🔥 Tillåter oss att se dina privata spellistor
+  "playlist-read-collaborative", // 🔥 Tillåter samarbetslistor
 ].join(" ");
 
 // --- PKCE Helpers ---
