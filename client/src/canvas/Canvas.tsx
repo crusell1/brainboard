@@ -28,6 +28,7 @@ import DrawModeControls from "../components/DrawModeControls";
 import ImageUrlModal from "../components/ImageUrlModal"; // 🔥 Importera ImageUrlModal
 import ShareModal from "../components/ShareModal"; // 🔥 Importera ShareModal
 import ConfirmModal from "../components/ConfirmModal"; // 🔥 Importera ConfirmModal
+import SpotifyPlayer from "../components/SpotifyPlayer"; // 🔥 Importera SpotifyPlayer
 import {
   Share2,
   Pencil,
@@ -2871,6 +2872,9 @@ export default function Canvas() {
         onClose={() => setMenuState((prev) => ({ ...prev, isOpen: false }))}
         onSelect={handleMenuSelect}
       />
+
+      {/* 🔥 Spotify Player */}
+      <SpotifyPlayer />
 
       {/* Dold input för bilduppladdning */}
       <input
