@@ -323,7 +323,8 @@ export default function NoteNode({
 
       // Expandera bara om innehållet faktiskt kräver mer plats än vad som finns.
       // Vi tvingar inte ihop noden om användaren har gjort den större manuellt.
-      if (requiredHeight > currentHeight + 2) {
+      // 🔥 FIX: Öka toleransen till 5px för att undvika loopar vid små skillnader
+      if (requiredHeight > currentHeight + 5) {
         onResizeRef.current?.(id, currentWidth, requiredHeight);
       }
     });
@@ -928,7 +929,7 @@ export default function NoteNode({
           boxSizing: "border-box", // 🔥 FIX: Se till att padding inte spräcker bredden
           fontSize: "var(--dynamic-font-size, 16px)", // 🔥 FIX: Använd CSS-variabeln för font-size
           overflowY: "auto", // 🔥 FIX: Tillåt scroll om texten blir för stor för rutan (bättre än hidden)
-          height: "100%", // Fyll ut höjden
+          height: "100%", // Fyll ut höjden (BaseNode content area)
         }}
       >
         {/* Tags Display (Top of content) */}

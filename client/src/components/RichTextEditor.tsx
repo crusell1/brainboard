@@ -584,7 +584,7 @@ export default function RichTextEditor({
         } tiptap`, // 🔥 FIX: Lägg till 'tiptap' klassen så NoteNode kan hitta och mäta den
         // 🔥 FIX: Ta bort min-height härifrån, låt containern styra. height: 100% fyller ut.
         style:
-          "height: 100%; outline: none; font-size: inherit; line-height: 1.5;",
+          "min-height: 100%; outline: none; font-size: inherit; line-height: 1.5;",
       },
     },
   });
@@ -647,8 +647,9 @@ export default function RichTextEditor({
             class: `focus:outline-none text-white ${
               isEditing ? "nodrag" : ""
             } tiptap`, // 🔥 FIX: Lägg till 'tiptap' här också
+            // 🔥 FIX: Använd flex: 1 istället för min-height: 100% för att undvika overflow-loopar med menyn
             style:
-              "min-height: 100%; outline: none; font-size: inherit; line-height: 1.5;",
+              "flex: 1; outline: none; font-size: inherit; line-height: 1.5;",
           },
         },
       });
@@ -666,7 +667,8 @@ export default function RichTextEditor({
         display: "flex",
         flexDirection: "column",
         width: "100%",
-        height: "auto", // 🔥 FIX: Låt innehållet styra höjden för att undvika resize-loop
+        flex: 1, // 🔥 FIX: Använd flex för att fylla ut föräldern istället för height: 100%
+        minHeight: 0, // 🔥 FIX: Tillåt krympning för att undvika flex-overflow
         flexShrink: 0,
         boxSizing: "border-box",
       }}
@@ -692,6 +694,9 @@ export default function RichTextEditor({
           lineHeight: "inherit", // 🔥 FIX: Ärv line-height
           overflowWrap: "anywhere", // 🔥 FIX: Bryt långa ord (bättre än break-word)
           wordBreak: "break-word",
+          flex: 1, // 🔥 FIX: Låt editor-content fylla ut wrappern
+          display: "flex", // 🔥 FIX: Gör editor-content till flex-container
+          flexDirection: "column",
         }}
         className="tiptap-container"
       />
@@ -735,6 +740,7 @@ export default function RichTextEditor({
       <style>{`
         .tiptap p { margin: 0 0 8px 0; }
         .tiptap ul, .tiptap ol { padding-left: 20px; margin: 4px 0; }
+        .tiptap p:last-child { margin-bottom: 0; } /* 🔥 FIX: Stoppa margin-loop */
         .tiptap ul { list-style-type: disc; }
         .tiptap ol { list-style-type: decimal; }
         .tiptap h1 { font-size: 1.6em; font-weight: bold; margin-bottom: 8px; }
