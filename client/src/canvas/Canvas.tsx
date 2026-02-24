@@ -20,6 +20,7 @@ import NoteNode, { type NoteData } from "../nodes/NoteNode";
 import ImageNode from "../nodes/ImageNode";
 import PomodoroNode from "../pomodoro/PomodoroNode"; // 🔥 Importera PomodoroNode
 import LinkNode from "../nodes/LinkNode"; // 🔥 Importera LinkNode
+import YouTubeNode from "../components/YouTubeNode"; // 🔥 Importera YouTubeNode
 import RadialMenu from "../components/RadialMenu";
 import DrawingLayer from "../components/DrawingLayer";
 import CursorLayer from "../components/CursorLayer"; // 🔥 Importera CursorLayer
@@ -167,6 +168,7 @@ export default function Canvas() {
       image: ImageNode,
       pomodoro: PomodoroNode,
       link: LinkNode,
+      youtube: YouTubeNode,
     }),
     [],
   ); // 🔥 Registrera pomodoro
@@ -240,6 +242,9 @@ export default function Canvas() {
 
   // 🔥 Ref för att begränsa antalet text-uppdateringar över nätverket
   const lastTextBroadcast = useRef(0);
+
+  // 🔥 Ref för att begränsa antalet drag-anrop över nätverket
+  const lastDragBroadcast = useRef(0);
 
   // 🔥 NY: Håll koll på vilka noder användaren interagerar med just nu (drag/resize)
   // Detta förhindrar att inkommande DB-uppdateringar skriver över lokala pågående ändringar (jitter/loopar).
@@ -450,7 +455,12 @@ export default function Canvas() {
             width:
               n.type === "link"
                 ? undefined
-                : (n.width ?? (n.type === "pomodoro" ? 340 : NODE_WIDTH)), // 🔥 Uppdaterad default bredd
+                : (n.width ??
+                  (n.type === "pomodoro"
+                    ? 340
+                    : n.type === "youtube"
+                      ? 640
+                      : NODE_WIDTH)), // 🔥 Uppdaterad default bredd
             height:
               n.type === "link"
                 ? undefined
@@ -459,12 +469,15 @@ export default function Canvas() {
                     ? undefined
                     : n.type === "pomodoro"
                       ? 460 // 🔥 Uppdaterad default höjd
-                      : NODE_HEIGHT)),
+                      : n.type === "youtube"
+                        ? 360
+                        : NODE_HEIGHT)),
           },
           data: {
             // Om det är en bild ligger URL:en i content, annars är content texten
             src: n.type === "image" ? n.content : undefined,
-            url: n.type === "link" ? n.content : undefined, // 🔥 Mappa URL för länkar
+            url:
+              n.type === "link" || n.type === "youtube" ? n.content : undefined, // 🔥 Mappa URL för länkar och youtube
             title: n.title ?? "",
             label:
               n.type === "image"
@@ -486,6 +499,8 @@ export default function Canvas() {
             plantDna: (n as any).plant_dna, // 🔥 Ladda DNA från DB
             currentFlower: (n as any).current_flower, // 🔥 FIX: Ladda currentFlower
             stats: (n as any).stats,
+            currentTime: (n as any).playback_time, // 🔥 Ladda sparad tid för YouTube
+            volume: (n as any).volume, // 🔥 Ladda sparad volym
           },
         }));
         setNodes(loadedNodes);
@@ -911,7 +926,7 @@ export default function Canvas() {
       const contentToSave =
         node.type === "image"
           ? node.data.src
-          : node.type === "link"
+          : node.type === "link" || node.type === "youtube"
             ? node.data.url
             : node.data.label;
 
@@ -934,7 +949,9 @@ export default function Canvas() {
                 ? undefined
                 : node.type === "pomodoro"
                   ? 460 // 🔥 Uppdaterad default höjd vid skapande
-                  : NODE_HEIGHT)),
+                  : node.type === "youtube"
+                    ? 360
+                    : NODE_HEIGHT)),
         color: node.data.color ?? "#f1f1f1",
         tags: node.data.tags || [],
         // 🔥 Spara Pomodoro-specifik data (kräver att DB-kolumner finns eller att vi använder en JSONB-kolumn 'data')
@@ -950,6 +967,8 @@ export default function Canvas() {
         plant_dna: (node.data as any).plantDna, // 🔥 Spara DNA till DB
         current_flower: (node.data as any).currentFlower, // 🔥 FIX: Spara currentFlower
         stats: (node.data as any).stats,
+        playback_time: (node.data as any).currentTime, // 🔥 Spara YouTube-tid
+        volume: (node.data as any).volume, // 🔥 Spara volym
       });
 
       if (error) console.error("Error creating node:", error);
@@ -964,7 +983,7 @@ export default function Canvas() {
       const contentToSave =
         node.type === "image"
           ? node.data.src
-          : node.type === "link"
+          : node.type === "link" || node.type === "youtube"
             ? node.data.url
             : node.data.label;
 
@@ -990,6 +1009,8 @@ export default function Canvas() {
           plant_dna: (node.data as any).plantDna, // 🔥 Uppdatera DNA i DB
           current_flower: (node.data as any).currentFlower, // 🔥 FIX: Uppdatera currentFlower
           stats: (node.data as any).stats,
+          playback_time: (node.data as any).currentTime, // 🔥 Uppdatera YouTube-tid
+          volume: (node.data as any).volume, // 🔥 Uppdatera volym
           // Vi skickar med updated_at för att vara säkra på att Supabase ser ändringen
           updated_at: new Date().toISOString(),
         })
@@ -1478,7 +1499,12 @@ export default function Canvas() {
   // 🔥 Live Dragging
   const onNodeDrag = useCallback((_event: React.MouseEvent, node: Node) => {
     // Skicka position till andra direkt
-    if (isRealtimeConnectedRef.current) {
+    const now = Date.now();
+    if (
+      now - lastDragBroadcast.current > 30 &&
+      isRealtimeConnectedRef.current
+    ) {
+      lastDragBroadcast.current = now;
       broadcastChannelRef.current?.send({
         type: "broadcast",
         event: "node-drag",
@@ -2383,6 +2409,30 @@ export default function Canvas() {
       };
 
       fetchRandomFlower();
+    }
+
+    if (optionId === "youtube") {
+      if (!reactFlowInstance) return;
+      const flowPosition = reactFlowInstance.screenToFlowPosition({
+        x: menuState.x,
+        y: menuState.y,
+      });
+      const centeredPosition = {
+        x: flowPosition.x - 320, // Halva bredden (640/2)
+        y: flowPosition.y - 180, // Halva höjden (360/2)
+      };
+
+      const newNode: Node = {
+        id: crypto.randomUUID(),
+        type: "youtube",
+        position: centeredPosition,
+        data: { url: "", videoId: null, volume: 50, currentTime: 0 },
+        style: { width: 640, height: 360 },
+      };
+
+      createNodeInDb(newNode);
+      setNodes((nds) => [...nds, newNode]);
+      saveSnapshot([...nodes, newNode], edges);
     }
 
     // Hantera AI-actions (Placeholder för framtida logik)

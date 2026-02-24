@@ -6,6 +6,7 @@ import {
   Mic,
   Timer,
   X,
+  Youtube,
 } from "lucide-react";
 
 interface RadialMenuProps {
@@ -24,6 +25,7 @@ export default function RadialMenu({
   onSelect,
 }: RadialMenuProps) {
   const [visible, setVisible] = useState(false);
+  const [hoveredOption, setHoveredOption] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -58,6 +60,12 @@ export default function RadialMenu({
       label: "Fokus",
       color: "#f59e0b",
     }, // 🔥 NY: Pomodoro
+    {
+      id: "youtube",
+      Icon: Youtube,
+      label: "Video",
+      color: "#ff0000",
+    },
     // { id: "ai-organize", Icon: Sparkles, label: "AI", color: "#8b5cf6" }, // Framtida feature
   ];
 
@@ -147,6 +155,8 @@ export default function RadialMenu({
           return (
             <div
               key={opt.id}
+              onMouseEnter={() => setHoveredOption(opt.id)}
+              onMouseLeave={() => setHoveredOption(null)}
               style={{
                 position: "absolute",
                 top: "50%",
@@ -199,6 +209,8 @@ export default function RadialMenu({
                   background: "rgba(0,0,0,0.5)",
                   padding: "2px 4px",
                   borderRadius: 4,
+                  opacity: hoveredOption === opt.id ? 1 : 0, // Visa bara vid hover
+                  transition: "opacity 0.2s",
                 }}
               >
                 {opt.label}

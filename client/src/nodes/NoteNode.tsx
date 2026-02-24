@@ -258,6 +258,50 @@ export default function NoteNode({
     }
   };
 
+  // 🔥 Dynamisk Font-Scaling Logic
+  // Vi använder useLayoutEffect för att undvika "pop" när fonten ändras
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    let lastWidth = 0;
+
+    const updateFontSize = () => {
+      const width = container.offsetWidth;
+
+      // 🔥 OPTIMERING: Avbryt om bredden inte ändrats signifikant (minskar onödiga beräkningar)
+      if (Math.abs(width - lastWidth) < 2) return;
+      lastWidth = width;
+
+      // --- KONFIGURATION ---
+      const baseWidth = 300; // Vid denna bredd...
+      const baseFontSize = 16; // ...är fonten 16px.
+      const minFontSize = 12; // Aldrig mindre än detta
+      const maxFontSize = 120; // Aldrig större än detta
+
+      // Beräkna skalning
+      const scale = width / baseWidth;
+      let newSize = baseFontSize * scale;
+
+      // Clamp (begränsa) värdet
+      newSize = Math.max(minFontSize, Math.min(newSize, maxFontSize));
+
+      // 🔥 FIX: Använd CSS-variabel på containern istället för direkt style på content
+      // Detta gör att värdet ärvs ner och överlever React-omrenderingar av barnen
+      container.style.setProperty("--dynamic-font-size", `${newSize}px`);
+    };
+
+    // Lyssna på storleksändringar på containern
+    const observer = new ResizeObserver(() => {
+      updateFontSize();
+    });
+
+    observer.observe(container);
+    updateFontSize(); // Kör direkt vid mount
+
+    return () => observer.disconnect();
+  }, []);
+
   // 🔥 Auto-resize logic: Mät texten och expandera noden om det behövs
   const checkSize = useCallback(() => {
     // Använd requestAnimationFrame för att garantera att vi mäter efter render
@@ -304,7 +348,8 @@ export default function NoteNode({
     mutationObserver.observe(target, {
       childList: true,
       subtree: true,
-      attributes: true,
+      attributes: false, // 🔥 FIX: Ignorera stiländringar (som font-size) för att stoppa loopen!
+      characterData: true, // Lyssna på textändringar istället
     });
 
     // Kör check direkt
@@ -881,6 +926,9 @@ export default function NoteNode({
           flex: 1,
           padding: "16px", // Padding inuti content area
           boxSizing: "border-box", // 🔥 FIX: Se till att padding inte spräcker bredden
+          fontSize: "var(--dynamic-font-size, 16px)", // 🔥 FIX: Använd CSS-variabeln för font-size
+          overflowY: "auto", // 🔥 FIX: Tillåt scroll om texten blir för stor för rutan (bättre än hidden)
+          height: "100%", // Fyll ut höjden
         }}
       >
         {/* Tags Display (Top of content) */}
@@ -995,7 +1043,7 @@ export default function NoteNode({
                 marginTop: 12,
                 paddingTop: 12,
                 borderTop: "1px solid rgba(255, 255, 255, 0.1)",
-                fontSize: "15px",
+                fontSize: "0.9em", // 🔥 Skalar med fonten
                 color: "#ccc",
                 fontStyle: "italic",
                 position: "relative",
@@ -1010,7 +1058,7 @@ export default function NoteNode({
                   alignItems: "center",
                   color: "#6366f1",
                   fontWeight: 600,
-                  fontSize: "12px",
+                  fontSize: "0.8em", // 🔥 Skalar med fonten
                   textTransform: "uppercase",
                 }}
               >

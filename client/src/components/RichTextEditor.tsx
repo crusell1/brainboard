@@ -579,10 +579,12 @@ export default function RichTextEditor({
     editorProps: {
       attributes: {
         // VIKTIGT: 'nodrag' läggs till villkorligt. Utan den kan vi dra noden via texten.
-        class: `prose prose-xl focus:outline-none text-white ${
+        class: `focus:outline-none text-white ${
           isEditing ? "nodrag" : ""
         } tiptap`, // 🔥 FIX: Lägg till 'tiptap' klassen så NoteNode kan hitta och mäta den
-        style: "min-height: 60px; outline: none;",
+        // 🔥 FIX: Ta bort min-height härifrån, låt containern styra. height: 100% fyller ut.
+        style:
+          "height: 100%; outline: none; font-size: inherit; line-height: 1.5;",
       },
     },
   });
@@ -642,10 +644,11 @@ export default function RichTextEditor({
       editor.setOptions({
         editorProps: {
           attributes: {
-            class: `prose prose-xl focus:outline-none text-white ${
+            class: `focus:outline-none text-white ${
               isEditing ? "nodrag" : ""
             } tiptap`, // 🔥 FIX: Lägg till 'tiptap' här också
-            style: "min-height: 60px; outline: none;",
+            style:
+              "min-height: 100%; outline: none; font-size: inherit; line-height: 1.5;",
           },
         },
       });
@@ -663,8 +666,7 @@ export default function RichTextEditor({
         display: "flex",
         flexDirection: "column",
         width: "100%",
-        height: "auto",
-        minHeight: "auto", // 🔥 FIX: Låt innehållet styra, tvinga inte 100%
+        height: "auto", // 🔥 FIX: Låt innehållet styra höjden för att undvika resize-loop
         flexShrink: 0,
         boxSizing: "border-box",
       }}
@@ -686,9 +688,9 @@ export default function RichTextEditor({
           width: "100%",
           cursor: isEditing ? "text" : "default",
           // Enkel styling för HTML-innehållet
-          fontSize: "20px",
-          lineHeight: "1.6",
-          overflowWrap: "break-word", // 🔥 FIX: Bryt långa ord
+          fontSize: "inherit", // 🔥 FIX: Ärv font-size från NoteNode
+          lineHeight: "inherit", // 🔥 FIX: Ärv line-height
+          overflowWrap: "anywhere", // 🔥 FIX: Bryt långa ord (bättre än break-word)
           wordBreak: "break-word",
         }}
         className="tiptap-container"
@@ -735,8 +737,6 @@ export default function RichTextEditor({
         .tiptap ul, .tiptap ol { padding-left: 20px; margin: 4px 0; }
         .tiptap ul { list-style-type: disc; }
         .tiptap ol { list-style-type: decimal; }
-        .tiptap h1 { font-size: 1.4em; font-weight: bold; margin-bottom: 8px; }
-        .tiptap h2 { font-size: 1.2em; font-weight: bold; margin-bottom: 6px; }
         .tiptap h1 { font-size: 1.6em; font-weight: bold; margin-bottom: 8px; }
         .tiptap h2 { font-size: 1.4em; font-weight: bold; margin-bottom: 6px; }
         .tiptap h3 { font-size: 1.2em; font-weight: bold; margin-bottom: 4px; }
