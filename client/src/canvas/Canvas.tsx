@@ -21,6 +21,7 @@ import ImageNode from "../nodes/ImageNode";
 import PomodoroNode from "../pomodoro/PomodoroNode"; // 🔥 Importera PomodoroNode
 import LinkNode from "../nodes/LinkNode"; // 🔥 Importera LinkNode
 import YouTubeNode from "../components/YouTubeNode"; // 🔥 Importera YouTubeNode
+import ChecklistNode from "../nodes/checklist/ChecklistNode"; // 🔥 Importera ChecklistNode
 import RadialMenu from "../components/RadialMenu";
 import DrawingLayer from "../components/DrawingLayer";
 import CursorLayer from "../components/CursorLayer"; // 🔥 Importera CursorLayer
@@ -31,6 +32,8 @@ import ShareModal from "../components/ShareModal"; // 🔥 Importera ShareModal
 import ConfirmModal from "../components/ConfirmModal"; // 🔥 Importera ConfirmModal
 import SpotifyPlayer from "../components/SpotifyPlayer"; // 🔥 Importera SpotifyPlayer
 import { spotifyApi } from "../lib/spotify"; // 🔥 Importera spotifyApi
+import ChecklistTypeModal from "../components/ChecklistTypeModal"; // 🔥 Importera ChecklistTypeModal
+import { habitService } from "../services/habitService"; // 🔥 Importera habitService
 import {
   Share2,
   Pencil,
@@ -169,6 +172,7 @@ export default function Canvas() {
       pomodoro: PomodoroNode,
       link: LinkNode,
       youtube: YouTubeNode,
+      checklist: ChecklistNode, // 🔥 Registrera checklist
     }),
     [],
   ); // 🔥 Registrera pomodoro
@@ -202,6 +206,11 @@ export default function Canvas() {
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showMobileSearch, setShowMobileSearch] = useState(false);
   // 🔥 NY: Responsivitet
+  const [showChecklistTypeModal, setShowChecklistTypeModal] = useState(false);
+  const [checklistMenuPosition, setChecklistMenuPosition] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768); // 🔥 FIX: Initiera direkt för att slippa "flash" av desktop-UI
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
@@ -482,14 +491,17 @@ export default function Canvas() {
             label:
               n.type === "image"
                 ? "Bild"
-                : n.type === "link"
-                  ? "Länk"
-                  : n.content,
+                : n.type === "checklist"
+                  ? "Checklista"
+                  : n.type === "link"
+                    ? "Länk"
+                    : n.content,
             color: n.color ?? "#f1f1f1",
             isEditing: false,
             tags: (n as any).tags || [],
             summary: (n as any).summary, // 🔥 Hämta summary
             aiTags: (n as any).ai_tags || [], // 🔥 Hämta ai_tags
+            boardId: n.board_id, // 🔥 VIKTIGT: Skicka med boardId till noden (för checklistor)
             // 🔥 Pomodoro data mapping
             status: (n as any).status,
             startTime: (n as any).start_time,
@@ -724,6 +736,7 @@ export default function Canvas() {
                     title: newNote.title,
                     label: newNote.type === "image" ? "Bild" : newNote.content,
                     color: newNote.color,
+                    boardId: newNote.board_id, // 🔥 VIKTIGT
                     isEditing: false,
                     // 🔥 Pomodoro defaults
                     status: (newNote as any).status,
@@ -774,6 +787,7 @@ export default function Canvas() {
                       summary: (newNote as any).summary, // 🔥 Synka summary
                       aiTags: (newNote as any).ai_tags || [], // 🔥 Synka ai_tags
                       // 🔥 Pomodoro sync
+                      boardId: newNote.board_id, // 🔥 VIKTIGT
                       status: (newNote as any).status,
                       startTime: (newNote as any).start_time,
                       pausedTime: (newNote as any).paused_time,
@@ -2247,6 +2261,65 @@ export default function Canvas() {
     event.target.value = "";
   };
 
+  const handleChecklistCreate = async (type: "regular" | "daily") => {
+    setShowChecklistTypeModal(false);
+    if (!reactFlowInstance || !boardId || !checklistMenuPosition) return;
+
+    const flowPosition = reactFlowInstance.screenToFlowPosition({
+      x: checklistMenuPosition.x,
+      y: checklistMenuPosition.y,
+    });
+
+    // 🔥 FIX: Anpassa höjden för dagsplanering så alla timmar får plats
+    const height = type === "daily" ? 800 : 400;
+
+    const centeredPosition = {
+      x: flowPosition.x - 150,
+      y: flowPosition.y - height / 2,
+    };
+
+    const newNode: Node = {
+      id: crypto.randomUUID(),
+      type: "checklist",
+      position: centeredPosition,
+      data: {
+        title: type === "daily" ? "Dagens Schema" : "Mina Vanor",
+        boardId: boardId,
+      },
+      style: { width: 300, height },
+    };
+
+    // Skapa noden först
+    await createNodeInDb(newNode);
+    setNodes((nds) => [...nds, newNode]);
+    saveSnapshot([...nodes, newNode], edges);
+
+    // Om dagsplanering, fyll på med tider
+    if (type === "daily") {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (session?.user) {
+        const userId = session.user.id;
+        const hours = Array.from({ length: 18 }, (_, i) => i + 6); // 06 till 23
+
+        // Skapa alla items parallellt för snabbhet
+        await Promise.all(
+          hours.map((hour, index) => {
+            const timeStr = `${hour.toString().padStart(2, "0")}:00`;
+            return habitService.createHabitItem(
+              newNode.id,
+              boardId,
+              userId,
+              timeStr,
+              index,
+            );
+          }),
+        );
+      }
+    }
+  };
+
   const handleMenuSelect = (optionId: string) => {
     console.log("Canvas: handleMenuSelect anropad med:", optionId);
     // Stäng menyn direkt
@@ -2433,6 +2506,13 @@ export default function Canvas() {
       createNodeInDb(newNode);
       setNodes((nds) => [...nds, newNode]);
       saveSnapshot([...nodes, newNode], edges);
+    }
+
+    // 🔥 Hantera Checklist
+    if (optionId === "checklist") {
+      setChecklistMenuPosition({ x: menuState.x, y: menuState.y });
+      setShowChecklistTypeModal(true);
+      return;
     }
 
     // Hantera AI-actions (Placeholder för framtida logik)
@@ -2924,6 +3004,14 @@ export default function Canvas() {
         onClose={() => setMenuState((prev) => ({ ...prev, isOpen: false }))}
         onSelect={handleMenuSelect}
       />
+
+      {/* 🔥 Checklist Type Modal */}
+      {showChecklistTypeModal && (
+        <ChecklistTypeModal
+          onSelect={handleChecklistCreate}
+          onClose={() => setShowChecklistTypeModal(false)}
+        />
+      )}
 
       {/* 🔥 Spotify Player */}
       <SpotifyPlayer />

@@ -7,6 +7,7 @@ import {
   Timer,
   X,
   Youtube,
+  CheckSquare, // 🔥 FIX: Importera ikonen
 } from "lucide-react";
 
 interface RadialMenuProps {
@@ -42,13 +43,19 @@ export default function RadialMenu({
   const options = [
     { id: "node", Icon: Type, label: "Text", color: "#6366f1" },
     {
+      id: "checklist", // 🔥 FIX: Lägg till Checklist-alternativet
+      Icon: CheckSquare,
+      label: "Checklista",
+      color: "#84cc16",
+    },
+    {
       id: "image-upload",
       Icon: ImageIcon,
       label: "Bild",
       color: "#10b981",
     },
     {
-      id: "link", // 🔥 Ändrat ID för att matcha ny logik
+      id: "link",
       Icon: LinkIcon,
       label: "Länk",
       color: "#3b82f6",
@@ -59,14 +66,13 @@ export default function RadialMenu({
       Icon: Timer,
       label: "Fokus",
       color: "#f59e0b",
-    }, // 🔥 NY: Pomodoro
+    },
     {
       id: "youtube",
       Icon: Youtube,
       label: "Video",
       color: "#ff0000",
     },
-    // { id: "ai-organize", Icon: Sparkles, label: "AI", color: "#8b5cf6" }, // Framtida feature
   ];
 
   const radius = 70; // Radie för cirkeln
@@ -108,13 +114,13 @@ export default function RadialMenu({
           position: "absolute",
           left: x,
           top: y,
-          width: 0, // 🔥 FIX: 0 storlek så den inte blockerar något
+          width: 0,
           height: 0,
-          overflow: "visible", // 🔥 FIX: Låt knappar sticka ut
-          transform: `scale(${isOpen ? 1 : 0.8})`, // Ingen translate behövs när w/h är 0
+          overflow: "visible",
+          transform: `scale(${isOpen ? 1 : 0.8})`,
           opacity: isOpen ? 1 : 0,
           transition: "all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275)",
-          zIndex: 10000, // 🔥 FIX: Se till att den ligger överst
+          zIndex: 10000,
         }}
       >
         {/* Stäng-knapp i mitten */}
@@ -131,16 +137,17 @@ export default function RadialMenu({
             alignItems: "center",
             justifyContent: "center",
             cursor: "pointer",
-            pointerEvents: "auto", // 🔥 FIX: Säkerställ klickbarhet
+            pointerEvents: "auto",
             position: "absolute",
             top: "50%",
             left: "50%",
             transform: "translate(-50%, -50%)",
             zIndex: 10,
             boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
+            padding: 0, // 🔥 FIX: Säkerställ att ikonen är centrerad
           }}
         >
-          <X size={32} color="white" strokeWidth={2.5} />
+          <X size={20} color="white" strokeWidth={1} />
         </button>
 
         {/* Cirkulära knappar */}
@@ -151,6 +158,7 @@ export default function RadialMenu({
           const btnY = Math.sin(angle) * radius;
 
           const Icon = opt.Icon;
+          const isHovered = hoveredOption === opt.id;
 
           return (
             <div
@@ -162,18 +170,18 @@ export default function RadialMenu({
                 top: "50%",
                 left: "50%",
                 transform: `translate(calc(-50% + ${btnX}px), calc(-50% + ${btnY}px))`,
-                pointerEvents: "auto", // 🔥 FIX: Säkerställ klickbarhet
+                pointerEvents: "auto",
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
-                gap: 4,
+                zIndex: isHovered ? 100 : 1, // 🔥 FIX: Lyft upp vid hover så texten syns över andra knappar
               }}
             >
               <button
                 type="button"
                 onClick={(e) => {
-                  e.preventDefault(); // 🔥 FIX: Förhindra default-beteende
-                  e.stopPropagation(); // 🔥 FIX: Förhindra att klicket bubblar och stänger saker
+                  e.preventDefault();
+                  e.stopPropagation();
                   console.log("RadialMenu: Valde", opt.id);
                   onSelect(opt.id);
                 }}
@@ -190,6 +198,7 @@ export default function RadialMenu({
                   cursor: "pointer",
                   boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
                   transition: "transform 0.1s",
+                  padding: 0, // 🔥 FIX: Säkerställ att ikonen är centrerad
                 }}
                 onMouseEnter={(e) =>
                   (e.currentTarget.style.transform = "scale(1.1)")
@@ -198,10 +207,13 @@ export default function RadialMenu({
                   (e.currentTarget.style.transform = "scale(1)")
                 }
               >
-                <Icon size={32} color={opt.color} strokeWidth={2.5} />
+                <Icon size={24} color={opt.color} strokeWidth={1} />
               </button>
               <span
                 style={{
+                  position: "absolute", // 🔥 FIX: Gör texten absolut så den inte påverkar centreringen av knappen
+                  top: "100%", // Placera under knappen
+                  marginTop: 8,
                   fontSize: 10,
                   fontWeight: 600,
                   color: "white",
@@ -209,8 +221,9 @@ export default function RadialMenu({
                   background: "rgba(0,0,0,0.5)",
                   padding: "2px 4px",
                   borderRadius: 4,
-                  opacity: hoveredOption === opt.id ? 1 : 0, // Visa bara vid hover
+                  opacity: isHovered ? 1 : 0, // Visa bara vid hover
                   transition: "opacity 0.2s",
+                  whiteSpace: "nowrap",
                 }}
               >
                 {opt.label}

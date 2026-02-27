@@ -161,6 +161,7 @@ export default function NoteNode({
   const [customTag, setCustomTag] = useState("");
   const isResizingRef = useRef(false); // 🔥 Håll koll på om vi drar manuellt
   const [dynamicMinHeight, setDynamicMinHeight] = useState(150); // 🔥 Håll koll på innehållets höjd
+  const autoSizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null); // 🔥 Debounce för auto-resize
 
   const toggleTag = (tag: string) => {
     const currentTags = data.tags || [];
@@ -336,16 +337,22 @@ export default function NoteNode({
     const target = contentRef.current;
     if (!target) return;
 
+    // 🔥 FIX: Debounce checkSize för att förhindra oändliga loopar vid snabba layout-ändringar (t.ex. på mobil)
+    const debouncedCheckSize = () => {
+      if (autoSizeTimeoutRef.current) {
+        clearTimeout(autoSizeTimeoutRef.current);
+      }
+      autoSizeTimeoutRef.current = setTimeout(() => {
+        checkSize();
+      }, 100); // 100ms debounce
+    };
+
     // 1. ResizeObserver: Lyssna på storleksändringar (t.ex. radbrytning)
-    const resizeObserver = new ResizeObserver(() => {
-      checkSize();
-    });
+    const resizeObserver = new ResizeObserver(debouncedCheckSize);
     resizeObserver.observe(target);
 
     // 2. MutationObserver: Lyssna på DOM-ändringar (t.ex. när summary läggs till/tas bort)
-    const mutationObserver = new MutationObserver(() => {
-      checkSize();
-    });
+    const mutationObserver = new MutationObserver(debouncedCheckSize);
     mutationObserver.observe(target, {
       childList: true,
       subtree: true,
@@ -359,6 +366,9 @@ export default function NoteNode({
     return () => {
       resizeObserver.disconnect();
       mutationObserver.disconnect();
+      if (autoSizeTimeoutRef.current) {
+        clearTimeout(autoSizeTimeoutRef.current);
+      }
     };
   }, [
     checkSize,
